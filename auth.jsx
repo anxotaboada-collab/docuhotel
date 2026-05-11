@@ -94,5 +94,52 @@ function LoadingScreen({ label }) {
   );
 }
 
+function ErrorScreen({ message, onRetry, onSignOut }) {
+  return (
+    <div className="app" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
+      <div style={{
+        background: "var(--surface, #fff)", padding: 28, borderRadius: 12,
+        width: "100%", maxWidth: 460,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.05)",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="brand-mark" style={{
+            width: 32, height: 32, borderRadius: 8, background: "#111", color: "#fff",
+            display: "grid", placeItems: "center", fontWeight: 700,
+          }}>DH</span>
+          <strong style={{ fontSize: 18 }}>Docuhotel</strong>
+        </div>
+        <h2 style={{ margin: 0, fontSize: 18, color: "#b91c1c" }}>No se pudieron cargar los datos</h2>
+        <p style={{ margin: 0, color: "#444", fontSize: 14 }}>
+          {message || "Se produjo un error al conectar con el servidor."}
+        </p>
+        <p style={{ margin: 0, color: "#888", fontSize: 12 }}>
+          Comprueba tu conexión a internet. Si el problema persiste, pide a tu administrador que verifique que tu cuenta está vinculada a un hotel.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button
+            type="button" onClick={onRetry}
+            style={{
+              padding: "10px 14px", borderRadius: 8, border: "none",
+              background: "#111", color: "#fff", fontWeight: 600, cursor: "pointer", flex: 1,
+            }}
+          >Reintentar</button>
+          {onSignOut && (
+            <button
+              type="button" onClick={onSignOut}
+              style={{
+                padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd",
+                background: "#fff", color: "#111", fontWeight: 500, cursor: "pointer",
+              }}
+            >Cerrar sesión</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 window.LoginForm = LoginForm;
 window.LoadingScreen = LoadingScreen;
+window.ErrorScreen = ErrorScreen;
