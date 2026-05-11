@@ -266,23 +266,41 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
     return window.DocuStore.addMonths(new Date(startDate).toISOString(), period.months);
   }, [startDate, period, isManual, manualExpiry]);
 
+  const [pendingFile, setPendingFile] = React.useState(null); // raw File object to upload on submit
+  const [uploading, setUploading] = React.useState(false);
+
   const onPickFile = (f) => {
     setError("");
     if (!f) return;
     if (f.type && f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
       setError(t.common.onlyPdf); return;
     }
-    if (f.size > 5 * 1024 * 1024) {
+    if (f.size > 25 * 1024 * 1024) {
       setError(t.common.tooLarge); return;
     }
-    setFile({ name: f.name, size: f.size, dataUrl: null }); // we keep just metadata; demo
+    setPendingFile(f);
+    setFile({ name: f.name, size: f.size, dataUrl: null });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title.trim()) { setError(t.common.required); return; }
+    const docId = doc?.id || window.DocuStore.uid("doc");
+    let fileMeta = file || { name: "documento.pdf", size: 0, dataUrl: null };
+    if (pendingFile && window.DocuApi && !window.DocuApi.offline && state.hotelId) {
+      setUploading(true);
+      try {
+        const up = await window.DocuApi.uploadDocFile(state.hotelId, docId, pendingFile);
+        fileMeta = { name: up.name, size: up.size, mime: up.mime, key: up.key, dataUrl: null };
+      } catch (err) {
+        setUploading(false);
+        setError("Error subiendo el archivo: " + (err?.message || err));
+        return;
+      }
+      setUploading(false);
+    }
     const next = {
-      id: doc?.id || window.DocuStore.uid("doc"),
+      id: docId,
       title: title.trim(),
       description,
       categoryId,
@@ -294,7 +312,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
       expiryDate,
       uploadedBy: doc?.uploadedBy || state.config.currentUserId,
       uploadedAt: doc?.uploadedAt || new Date().toISOString(),
-      file: file || { name: "documento.pdf", size: 0, dataUrl: null },
+      file: fileMeta,
       version: doc ? doc.version + (doc.title !== title ? 1 : 0) : 1,
       publicAccess,
     };
@@ -310,8 +328,10 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn btn-primary" onClick={handleSubmit}><Icon.check /> {t.common.save}</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={uploading}>{t.common.cancel}</button>
+          <button className="btn btn-primary" onClick={handleSubmit} disabled={uploading}>
+            <Icon.check /> {uploading ? "Subiendo…" : t.common.save}
+          </button>
         </>
       }
     >
