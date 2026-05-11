@@ -265,11 +265,11 @@ create table if not exists hotel_config (
 -- ───────────────────────────────────────────────────────────────────
 
 create or replace function set_updated_at() returns trigger
-language plpgsql as $$
+language plpgsql as $fn$
 begin new.updated_at = now(); return new; end;
-$$;
+$fn$;
 
-do $$
+do $do$
 declare t text;
 begin
   for t in select unnest(array[
@@ -278,7 +278,8 @@ begin
     execute format('drop trigger if exists trg_%I_updated on %I', t, t);
     execute format('create trigger trg_%I_updated before update on %I for each row execute function set_updated_at()', t, t);
   end loop;
-end $$;
+end
+$do$;
 
 -- ───────────────────────────────────────────────────────────────────
 -- RLS
@@ -319,17 +320,20 @@ drop policy if exists app_users_self_update on app_users;
 create policy app_users_self_update on app_users for update using (id = auth.uid()) with check (id = auth.uid());
 
 -- Generic hotel-scoped policies (same shape repeated)
-do $$
+do $do$
 declare t text;
 begin
   for t in select unnest(array[
     'categories','departments','statuses','periods','responsibles',
     'projects','email_templates','hotel_config'
   ]) loop
-    execute format('drop policy if exists %1$I_select on %1$I; create policy %1$I_select on %1$I for select using (hotel_id = current_hotel_id())', t);
-    execute format('drop policy if exists %1$I_admin_write on %1$I; create policy %1$I_admin_write on %1$I for all using (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head'')) with check (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head''))', t);
+    execute format('drop policy if exists %1$I_select on %1$I', t);
+    execute format('create policy %1$I_select on %1$I for select using (hotel_id = current_hotel_id())', t);
+    execute format('drop policy if exists %1$I_admin_write on %1$I', t);
+    execute format('create policy %1$I_admin_write on %1$I for all using (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head'')) with check (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head''))', t);
   end loop;
-end $$;
+end
+$do$;
 
 -- Documents: select scoped by department visibility.
 drop policy if exists documents_select on documents;
@@ -382,17 +386,21 @@ create policy request_log_rw on request_log
 -- Documents marked as public_access can be read by anyone who knows hotel.public_token.
 -- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
 create or replace function public_documents(p_token text)
-returns setof documents language sql stable security definer set search_path = public as $$
+returns setof documents
+language sql stable security definer set search_path = public
+as $fn$
   select d.*
   from documents d
   join hotels h on h.id = d.hotel_id
   where h.public_token = p_token and d.public_access = true;
-$$;
+$fn$;
 grant execute on function public_documents(text) to anon, authenticated;
 
 -- Project audit: validate share token and return docs.
 create or replace function audit_project(p_token text)
-returns table(project json, docs json) language sql stable security definer set search_path = public as $$
+returns table(project jsonb, docs jsonb)
+language sql stable security definer set search_path = public
+as $fn$
   select
     to_jsonb(p) - 'share_token',
     coalesce(jsonb_agg(to_jsonb(d)) filter (where d.id is not null), '[]'::jsonb)
@@ -401,12 +409,14 @@ returns table(project json, docs json) language sql stable security definer set 
   where p.share_token = p_token
     and (p.share_expires_at is null or p.share_expires_at > now())
   group by p.id;
-$$;
+$fn$;
 grant execute on function audit_project(text) to anon, authenticated;
 
 -- Request access via share_token: returns request + items + uploads (no auth).
 create or replace function request_by_token(p_token text)
-returns json language sql stable security definer set search_path = public as $$
+returns jsonb
+language sql stable security definer set search_path = public
+as $fn$
   select jsonb_build_object(
     'request', to_jsonb(r),
     'items', coalesce((select jsonb_agg(to_jsonb(i) order by i.sort) from request_items i where i.request_id = r.id), '[]'::jsonb),
@@ -414,18 +424,25 @@ returns json language sql stable security definer set search_path = public as $$
                           join request_items i on i.id = u.request_item_id
                          where i.request_id = r.id and u.deleted_at is null), '[]'::jsonb)
   ) from requests r where r.share_token = p_token;
-$$;
+$fn$;
 grant execute on function request_by_token(text) to anon, authenticated;
 
 -- Append to request_log without auth (for public uploaders).
 create or replace function request_log_append(p_token text, p_action text, p_details text)
-returns void language plpgsql security definer set search_path = public as $$
-declare r_id text;
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+declare
+  v_request_id text;
 begin
-  select id into r_id from requests where share_token = p_token;
-  if r_id is null then raise exception 'invalid token'; end if;
-  insert into request_log(request_id, action, details) values (r_id, p_action, p_details);
-end $$;
+  select r.id into v_request_id from requests r where r.share_token = p_token;
+  if v_request_id is null then
+    raise exception 'invalid token';
+  end if;
+  insert into request_log (request_id, action, details)
+  values (v_request_id, p_action, p_details);
+end;
+$fn$;
 grant execute on function request_log_append(text, text, text) to anon, authenticated;
 
 -- ───────────────────────────────────────────────────────────────────

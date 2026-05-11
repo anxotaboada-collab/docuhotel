@@ -53,14 +53,15 @@ And under **Storage** → a bucket called `docuhotel` (private).
 
 ### 2.4 Run the seed
 
-1. Open `supabase/seed.sql` and replace the four `\set` placeholders at the top:
+1. Open `supabase/seed.sql` and edit the four values inside the `declare` block near the top:
+   ```sql
+   v_user_id uuid := '<paste the auth user UID here>';
+   v_email   text := 'admin@yourhotel.com';
+   v_name    text := 'Tu Nombre';
+   v_hname   text := 'Mi Hotel';
    ```
-   \set AUTH_USER_ID '<paste UID here>'
-   \set ADMIN_EMAIL  'admin@yourhotel.com'
-   \set ADMIN_NAME   'Tu Nombre'
-   \set HOTEL_NAME   'Mi Hotel'
-   ```
-2. Paste into **SQL Editor** and run.
+   (The file is plain SQL — don't use psql `\set`, it doesn't work in the Supabase SQL Editor.)
+2. Paste the whole file into **SQL Editor** and run it. You should see a `NOTICE: Seed complete...`.
 
 This creates your hotel row, attaches the admin user to it, and inserts the default taxonomies (categories, departments, statuses, periods).
 

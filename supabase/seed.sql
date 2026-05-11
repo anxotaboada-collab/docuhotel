@@ -1,31 +1,27 @@
 -- Docuhotel — Seed data for a brand-new hotel.
 -- Run ONCE after creating your first auth user.
--- BEFORE running, replace the two placeholders below:
---   :AUTH_USER_ID   the uuid of your first Supabase auth user (Authentication → Users → click user → "User UID")
---   :ADMIN_EMAIL    that user's email
---   :ADMIN_NAME     a display name for the admin
---   :HOTEL_NAME     your hotel's name
+--
+-- HOW TO RUN (Supabase SQL Editor — NOT psql):
+--   1. Authentication → Users → create your admin user, copy its "User UID".
+--   2. Edit the 4 values in the `declare` block below (v_user_id, v_email, v_name, v_hname).
+--   3. Paste the whole file into the SQL Editor and run it.
+--
+-- Note: this file uses plain SQL only (no psql `\set` / `:var` — those don't
+-- work in the Supabase SQL Editor).
 
--- Example:
---   psql ... -v AUTH_USER_ID="'11111111-1111-1111-1111-111111111111'" \
---             -v ADMIN_EMAIL="'admin@hotel.com'" \
---             -v ADMIN_NAME="'Admin'" \
---             -v HOTEL_NAME="'Hotel Demo'" -f seed.sql
--- Or just edit the values inline below and run from the SQL editor.
-
-\set AUTH_USER_ID '00000000-0000-0000-0000-000000000000'
-\set ADMIN_EMAIL  'admin@hotel.com'
-\set ADMIN_NAME   'Administrador'
-\set HOTEL_NAME   'Hotel Demo'
-
-do $$
+do $do$
 declare
+  -- ▼▼▼ EDIT THESE FOUR VALUES ▼▼▼
+  v_user_id uuid := '00000000-0000-0000-0000-000000000000';  -- the auth user UID
+  v_email   text := 'admin@hotel.com';
+  v_name    text := 'Administrador';
+  v_hname   text := 'Hotel Demo';
+  -- ▲▲▲ EDIT THESE FOUR VALUES ▲▲▲
   v_hotel_id uuid;
-  v_user_id  uuid := :'AUTH_USER_ID'::uuid;
-  v_email    text := :'ADMIN_EMAIL';
-  v_name     text := :'ADMIN_NAME';
-  v_hname    text := :'HOTEL_NAME';
 begin
+  if v_user_id = '00000000-0000-0000-0000-000000000000'::uuid then
+    raise exception 'Edit v_user_id at the top of this file with your real auth user UID first.';
+  end if;
   -- Hotel
   insert into hotels(name) values (v_hname) returning id into v_hotel_id;
 
@@ -79,4 +75,7 @@ begin
 
   -- Empty hotel_config (frontend will fill it)
   insert into hotel_config(hotel_id, data) values (v_hotel_id, '{}'::jsonb);
-end $$;
+
+  raise notice 'Seed complete. Hotel "%" created with id %, admin %.', v_hname, v_hotel_id, v_email;
+end
+$do$;
