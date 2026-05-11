@@ -383,9 +383,17 @@ create policy request_log_rw on request_log
 -- Public access via token (anonymous users)
 -- ───────────────────────────────────────────────────────────────────
 
+-- These RPCs are dropped first so re-running this file is safe even if an
+-- older version with a different return type exists (Postgres refuses to
+-- change a function's return type via CREATE OR REPLACE).
+drop function if exists public_documents(text);
+drop function if exists audit_project(text);
+drop function if exists request_by_token(text);
+drop function if exists request_log_append(text, text, text);
+
 -- Documents marked as public_access can be read by anyone who knows hotel.public_token.
 -- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
-create or replace function public_documents(p_token text)
+create function public_documents(p_token text)
 returns setof documents
 language sql stable security definer set search_path = public
 as $fn$
@@ -397,7 +405,7 @@ $fn$;
 grant execute on function public_documents(text) to anon, authenticated;
 
 -- Project audit: validate share token and return docs.
-create or replace function audit_project(p_token text)
+create function audit_project(p_token text)
 returns table(project jsonb, docs jsonb)
 language sql stable security definer set search_path = public
 as $fn$
@@ -413,7 +421,7 @@ $fn$;
 grant execute on function audit_project(text) to anon, authenticated;
 
 -- Request access via share_token: returns request + items + uploads (no auth).
-create or replace function request_by_token(p_token text)
+create function request_by_token(p_token text)
 returns jsonb
 language sql stable security definer set search_path = public
 as $fn$
@@ -428,7 +436,7 @@ $fn$;
 grant execute on function request_by_token(text) to anon, authenticated;
 
 -- Append to request_log without auth (for public uploaders).
-create or replace function request_log_append(p_token text, p_action text, p_details text)
+create function request_log_append(p_token text, p_action text, p_details text)
 returns void
 language plpgsql security definer set search_path = public
 as $fn$
