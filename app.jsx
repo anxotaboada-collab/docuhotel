@@ -66,27 +66,49 @@ function App() {
   }, [useBackend, isPublicRoute, route]);
 
   // Backend bootstrap: load state once authenticated, or show login.
+  const [bootError, setBootError] = useState("");
+  const [bootRetry, setBootRetry] = useState(0);
   useEffect(() => {
     if (!useBackend || isPublicRoute) return;
     let cancelled = false;
+    // Safety net: if Supabase hangs (storage adapter / network), don't keep
+    // spinning forever — surface an error so the user can retry or sign in.
+    const withTimeout = (p, ms, label) => Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} timeout`)), ms)),
+    ]);
     const boot = async () => {
-      const session = await window.DocuApi.getSession();
-      if (cancelled) return;
-      if (!session) { setBootStatus("login"); return; }
-      const next = await window.DocuStore.loadStateFromBackend();
-      if (cancelled) return;
-      if (!next) { setBootStatus("login"); return; }
-      setStateRaw(next);
-      setBootStatus("ready");
+      try {
+        const session = await withTimeout(window.DocuApi.getSession(), 15000, "getSession");
+        if (cancelled) return;
+        if (!session) { setBootStatus("login"); return; }
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 20000, "loadState");
+        if (cancelled) return;
+        if (!next) { setBootError("No pudimos cargar los datos del hotel. Verifica tu cuenta o intenta de nuevo."); setBootStatus("error"); return; }
+        setStateRaw(next);
+        setBootStatus("ready");
+      } catch (e) {
+        console.error("boot", e);
+        if (cancelled) return;
+        setBootError(e?.message || "Error al conectar con el servidor.");
+        setBootStatus("error");
+      }
     };
     boot();
     const unsub = window.DocuApi.onAuthChange(async (sess) => {
-      if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
-      const next = await window.DocuStore.loadStateFromBackend();
-      if (next) { setStateRaw(next); setBootStatus("ready"); }
+      try {
+        if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 20000, "loadState");
+        if (next) { setStateRaw(next); setBootStatus("ready"); }
+        else { setBootError("No pudimos cargar los datos del hotel."); setBootStatus("error"); }
+      } catch (e) {
+        console.error("auth change", e);
+        setBootError(e?.message || "Error al conectar con el servidor.");
+        setBootStatus("error");
+      }
     });
     return () => { cancelled = true; unsub && unsub(); };
-  }, [useBackend, isPublicRoute]);
+  }, [useBackend, isPublicRoute, bootRetry]);
 
   const lang = state?.config?.lang || "es";
   const t = useMemo(() => ({ ...window.TRANSLATIONS[lang], _lang: lang }), [lang]);
@@ -120,6 +142,7 @@ function App() {
 
   if (useBackend && !isPublicRoute) {
     if (bootStatus === "loading") return <window.LoadingScreen label="Cargando datos del hotel…" />;
+    if (bootStatus === "error")   return <window.ErrorScreen message={bootError} onRetry={() => { setBootError(""); setBootStatus("loading"); setBootRetry(n => n + 1); }} onSignOut={() => window.DocuApi.signOut().then(() => location.reload())} />;
     if (bootStatus === "login")   return <window.LoginForm onSignedIn={() => setBootStatus("loading")} />;
     if (!state)                   return <window.LoadingScreen label="Cargando…" />;
   }
