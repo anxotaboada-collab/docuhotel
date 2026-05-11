@@ -79,10 +79,10 @@ function App() {
     ]);
     const boot = async () => {
       try {
-        const session = await withTimeout(window.DocuApi.getSession(), 15000, "getSession");
+        const session = await withTimeout(window.DocuApi.getSession(), 30000, "getSession");
         if (cancelled) return;
         if (!session) { setBootStatus("login"); return; }
-        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 20000, "loadState");
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 45000, "loadState");
         if (cancelled) return;
         if (!next) { setBootError("No pudimos cargar los datos del hotel. Verifica tu cuenta o intenta de nuevo."); setBootStatus("error"); return; }
         setStateRaw(next);
@@ -98,7 +98,7 @@ function App() {
     const unsub = window.DocuApi.onAuthChange(async (sess) => {
       try {
         if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
-        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 20000, "loadState");
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 45000, "loadState");
         if (next) { setStateRaw(next); setBootStatus("ready"); }
         else { setBootError("No pudimos cargar los datos del hotel."); setBootStatus("error"); }
       } catch (e) {
