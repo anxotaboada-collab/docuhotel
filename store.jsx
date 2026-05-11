@@ -471,6 +471,71 @@ function daysUntil(iso) {
   return Math.ceil(ms / 86400000);
 }
 
+// ── Backend bridge ────────────────────────────────────────────────────
+// In Supabase mode (DocuApi.offline === false) we load from the cloud and
+// debounce-write changes back. The rest of the app keeps using setState +
+// saveState transparently.
+
+async function loadStateFromBackend() {
+  if (!window.DocuApi || window.DocuApi.offline) return loadState();
+  try {
+    const me = await window.DocuApi.getMe();
+    if (!me) return null; // not authenticated → caller will show login
+    const s = await window.DocuApi.loadFullState(me.hotel.id);
+    if (!s) return null;
+    // Bridge: populate config with auth-derived currentUserId + public token.
+    const def = defaultState().config;
+    s.config = {
+      ...def,
+      ...(s.config || {}),
+      emailLog: s.config?.emailLog || [],
+      emailTemplates: (s.config?.emailTemplates?.length ? s.config.emailTemplates : def.emailTemplates),
+      currentUserId: me.authUser.id,
+      lang: s.config?.lang || "es",
+      publicToken: me.hotel.public_token,
+      hotel: {
+        name: me.hotel.name,
+        country: me.hotel.country,
+        timezone: me.hotel.timezone,
+      },
+    };
+    // Ensure we always have at least the authenticated user in the list, even
+    // if the app_users row hasn't been fetched yet.
+    if (!s.users.find((u) => u.id === me.authUser.id)) {
+      s.users.push({
+        id: me.authUser.id, name: me.profile.name, email: me.profile.email,
+        role: me.profile.role, departments: me.profile.departments || [],
+      });
+    }
+    // Cache snapshot for diffing.
+    window.__docuPrevState = JSON.parse(JSON.stringify(s));
+    return s;
+  } catch (e) {
+    console.error("loadStateFromBackend", e);
+    return null;
+  }
+}
+
+let _saveTimer = null;
+function saveStateToBackend(next) {
+  // Always mirror to localStorage as a safety net for tab reloads.
+  saveState(next);
+  if (!window.DocuApi || window.DocuApi.offline) return;
+  if (!next?.hotelId) return;
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    const prev = window.__docuPrevState;
+    try {
+      await window.DocuApi.saveDiff(prev, next);
+      window.__docuPrevState = JSON.parse(JSON.stringify(next));
+    } catch (e) {
+      console.error("saveStateToBackend", e);
+    }
+  }, 600);
+}
+
 window.DocuStore = {
-  LS_KEY, defaultState, loadState, saveState, uid, addMonths, daysUntil,
+  LS_KEY, defaultState, loadState, saveState,
+  loadStateFromBackend, saveStateToBackend,
+  uid, addMonths, daysUntil,
 };

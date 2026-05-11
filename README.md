@@ -1,40 +1,82 @@
 # Docuhotel
 
-Gestor de documentos para hoteles — prototipo funcional.
+Gestor de documentos para hoteles. Frontend estático (HTML + React vía Babel en navegador) sobre backend Supabase opcional.
+
+## Modos
+
+| Modo | Backend | Multi-usuario | Persistencia |
+|---|---|---|---|
+| **Offline** (`offlineMode: true`) | — | No | `localStorage` |
+| **Supabase** (`offlineMode: false`) | Supabase (Postgres + Auth + Storage) | Sí | Cloud |
+
+El frontend es el mismo en ambos modos — cambia solo `config.js`.
 
 ## Funcionalidades
 
-- 📄 **Documentos** — gestión completa con categorías, departamentos, estados, vigencias y caducidad manual
+- 📄 **Documentos** — categorías, departamentos, estados, vigencias y caducidad manual
 - 📁 **Proyectos** — agrupa documentos y comparte con auditor externo vía enlace temporal (con marca de agua)
 - 📥 **Solicitudes** — pide documentación a empleados/proveedores con enlace temporal, drag&drop y log
 - 🌐 **Acceso público QR** — documentos marcados como públicos accesibles por código QR
 - ⚙️ **Administración** — categorías, departamentos, estados con colores, periodos, usuarios, plantillas de email, roles/permisos, datos del hotel
 - 📊 **Registro inmutable** — todas las acciones quedan registradas
+- 🔐 **Auth + RLS por hotel y departamento** (modo Supabase)
 - 🌍 **Multidioma** — Español, English, Deutsch
 - 🎨 **Modo oscuro** y densidad configurable
 
-## Cómo abrir
+## Inicio rápido
 
-Abre `index.html` directamente en el navegador. Todo el estado se guarda en `localStorage`.
+### Demo local (sin backend)
 
-## Arquitectura de producción
+```bash
+cp config.example.js config.js
+# en config.js, deja offlineMode: true
+npx serve .
+```
 
-Ver `ARQUITECTURA.md` para la migración a:
-- **GitHub** → código
-- **Vercel** → publicación
-- **Supabase** → base de datos + auth
-- **Cloudflare R2** → almacenamiento de PDFs
+Abre `http://localhost:3000`. Los datos viven en `localStorage`.
 
-## Stack actual (prototipo)
+### Producción con Supabase
 
-- HTML + React 18.3 (vía Babel in-browser)
-- localStorage para persistencia
-- Sin build step — abre el HTML y funciona
+Ver **[DEPLOYMENT.md](./DEPLOYMENT.md)** para el paso a paso completo.
 
-## Deploy en Vercel
+Resumen:
+1. Crear proyecto Supabase, ejecutar `supabase/schema.sql` + `supabase/storage.sql`.
+2. Crear usuario admin en Authentication y ejecutar `supabase/seed.sql`.
+3. Copiar `config.example.js` → `config.js` con la URL + anon key.
+4. Importar el repo en Vercel (Framework: Other, sin build command).
 
-1. Importa el repo en [vercel.com/new](https://vercel.com/new)
-2. Framework Preset: **Other**
-3. Build Command: *(vacío)*
-4. Output Directory: `./`
-5. Deploy
+## Arquitectura
+
+```
+Vercel (static)  ──►  Supabase Auth + Postgres (con RLS)
+                 ──►  Supabase Storage (PDFs, RLS por hotel)
+```
+
+- Sin servidor propio, sin build step.
+- Toda la persistencia pasa por `api.jsx`. El resto del frontend (`store.jsx`, componentes) sigue trabajando con el mismo objeto `state` que tenía en el prototipo.
+- `store.jsx` carga el estado completo al iniciar y persiste cambios con un diff incremental cada 600 ms.
+
+Más detalle en [ARQUITECTURA.md](./ARQUITECTURA.md).
+
+## Estructura
+
+```
+index.html              # Entry point
+config.example.js       # Plantilla para config.js (gitignored)
+api.jsx                 # Cliente Supabase + uploads
+store.jsx               # Carga/guardado + helpers (uid, addMonths, daysUntil)
+auth.jsx                # Pantalla de login
+app.jsx                 # Shell + bootstrap + rutas
+documents.jsx           # Listado + formulario de documentos
+viewer.jsx              # Visor con marca de agua
+requests.jsx            # Solicitudes a terceros (público)
+projects.jsx + audit.jsx# Auditorías compartidas
+public.jsx              # Vista pública por QR
+admin.jsx               # Panel de administración
+log.jsx                 # Registro de actividad
+i18n.jsx                # Traducciones es/en/de
+ui.jsx + tweaks-panel.jsx# UI compartida
+styles.css              # Estilos
+supabase/               # schema.sql, storage.sql, seed.sql
+vercel.json             # Headers + cleanUrls
+```

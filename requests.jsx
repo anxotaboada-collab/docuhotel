@@ -59,23 +59,24 @@ function RequestsPage({ state, setState, t, lang, log }) {
     return { label: t.requests?.statusPending || "Pendiente", bg: "var(--bg-soft)", fg: "var(--muted)" };
   };
 
-  const downloadAll = (r, ev) => {
+  const downloadAll = async (r, ev) => {
     ev?.stopPropagation();
     const files = r.items.flatMap(it => (it.files || []).map(f => ({ ...f, itemTitle: it.title })));
     if (files.length === 0) { alert(t.requests?.noFilesYet || "Aún no se ha subido ningún documento."); return; }
-    // Trigger sequential downloads (data URLs)
-    files.forEach((f, i) => {
-      setTimeout(() => {
-        const a = document.createElement("a");
-        a.href = f.dataUrl;
-        const safeItem = f.itemTitle.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40);
-        const ext = f.name.includes(".") ? "" : "";
-        a.download = `${String(i+1).padStart(2,"0")}_${safeItem}_${f.name}${ext}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }, i * 250);
-    });
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      let href = f.dataUrl;
+      if (!href && f.key && window.DocuApi && !window.DocuApi.offline) {
+        href = await window.DocuApi.signedUrl(f.key);
+      }
+      if (!href) continue;
+      const a = document.createElement("a");
+      a.href = href;
+      const safeItem = f.itemTitle.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40);
+      a.download = `${String(i+1).padStart(2,"0")}_${safeItem}_${f.name}`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      await new Promise(res => setTimeout(res, 250));
+    }
     log("request_download_all", `${r.title} (${files.length} archivos)`);
   };
 
@@ -336,17 +337,24 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
             <div style={{ marginTop: 18, padding: 12, background: 'var(--ok-bg)', borderRadius: 10 }}>
               <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ok)', fontWeight: 600, marginBottom: 8 }}>✓ {t.requests?.statusSubmitted || "Enviada"}</div>
               <div style={{ fontSize: 12, color: 'var(--ink)', marginBottom: 10 }}>{new Date(request.submittedAt).toLocaleString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB")}</div>
-              <button className="btn btn-sm" onClick={() => {
+              <button className="btn btn-sm" onClick={async () => {
                 const files = (request.items || []).flatMap(it => (it.files || []).map(f => ({ ...f, itemTitle: it.title })));
                 if (!files.length) { alert(t.requests?.noFilesYet || "No hay archivos."); return; }
-                files.forEach((f, i) => setTimeout(() => {
+                for (let i = 0; i < files.length; i++) {
+                  const f = files[i];
+                  let href = f.dataUrl;
+                  if (!href && f.key && window.DocuApi && !window.DocuApi.offline) {
+                    href = await window.DocuApi.signedUrl(f.key);
+                  }
+                  if (!href) continue;
                   const a = document.createElement("a");
-                  a.href = f.dataUrl;
+                  a.href = href;
                   const safeItem = f.itemTitle.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40);
                   a.download = `${String(i+1).padStart(2,"0")}_${safeItem}_${f.name}`;
                   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                }, i * 250));
-                log("request_download_all", `${request.title} (${files.length})`);
+                  await new Promise(res => setTimeout(res, 250));
+                }
+                log && log("request_download_all", `${request.title} (${files.length})`);
               }} style={{ width: '100%' }}>⬇ {t.requests?.downloadAll || "Descargar todos"} ({(request.items || []).reduce((a,i) => a + (i.files?.length||0), 0)})</button>
             </div>
           )}
@@ -391,18 +399,33 @@ function RequestSubmitView({ request, state, setState, t, lang, setLang }) {
     }));
   };
 
-  const onFile = (itemId, file) => {
+  const onFile = async (itemId, file) => {
     if (!file) return;
     const maxBytes = (request.maxFileSizeMb || 10) * 1024 * 1024;
     if (file.size > maxBytes) {
       alert((t.requests?.tooBig || "Archivo demasiado grande. Máximo:") + " " + request.maxFileSizeMb + " MB");
       return;
     }
+    const useBackend = window.DocuApi && !window.DocuApi.offline;
+    const itTitle = items.find(it => it.id === itemId)?.title || "";
+    if (useBackend) {
+      try {
+        const uploadId = window.DocuStore.uid("up");
+        const up = await window.DocuApi.uploadRequestFile(request.id, itemId, uploadId, file);
+        const fileObj = { id: up.id, name: up.name, size: up.size, type: file.type, key: up.key, uploadedAt: new Date().toISOString(), dataUrl: null };
+        const newItems = items.map(it => it.id === itemId ? { ...it, files: [...(it.files || []), fileObj] } : it);
+        await window.DocuApi.requestLog(request.shareToken, "upload", `${itTitle}: ${file.name} (${(file.size/1024).toFixed(0)} KB)`);
+        persistItems(newItems, { ts: new Date().toISOString(), action: "upload", details: `${itTitle}: ${file.name} (${(file.size/1024).toFixed(0)} KB)` });
+      } catch (err) {
+        alert("Error subiendo el archivo: " + (err?.message || err));
+      }
+      return;
+    }
+    // Offline / localStorage mode (prototype)
     const reader = new FileReader();
     reader.onload = () => {
       const fileObj = { name: file.name, size: file.size, type: file.type, uploadedAt: new Date().toISOString(), dataUrl: reader.result };
       const newItems = items.map(it => it.id === itemId ? { ...it, files: [...(it.files || []), fileObj] } : it);
-      const itTitle = items.find(it => it.id === itemId)?.title || "";
       persistItems(newItems, { ts: new Date().toISOString(), action: "upload", details: `${itTitle}: ${file.name} (${(file.size/1024).toFixed(0)} KB)` });
     };
     reader.readAsDataURL(file);
