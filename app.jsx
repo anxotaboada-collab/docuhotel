@@ -8,29 +8,87 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 function App() {
-  const [state, setStateRaw] = useState(() => window.DocuStore.loadState());
+  const useBackend = !!(window.DocuApi && !window.DocuApi.offline);
+  const [route, setRouteState] = useState(window.location.hash || "");
+  const isPublicRoute = /^#\/(public|audit|request)\//.test(route);
+
+  const [bootStatus, setBootStatus] = useState(
+    useBackend && !isPublicRoute ? "loading" : "ready"
+  );
+  const [state, setStateRaw] = useState(() =>
+    (useBackend && !isPublicRoute) ? null : window.DocuStore.loadState()
+  );
   const [tab, setTab] = useState("documents");
   const [viewerDoc, setViewerDoc] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [tweaks, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
-  const [route, setRoute] = useState(window.location.hash || "");
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash || "");
+    const onHash = () => setRouteState(window.location.hash || "");
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const setState = (updater) => {
-    setStateRaw(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      window.DocuStore.saveState(next);
-      return next;
-    });
-  };
+  // Public route bootstrap (backend mode, no auth required): fetch via RPC.
+  useEffect(() => {
+    if (!useBackend || !isPublicRoute) return;
+    let cancelled = false;
+    const bootPublic = async () => {
+      const def = window.DocuStore.defaultState();
+      const m1 = route.match(/^#\/public\/(.+)$/);
+      const m2 = route.match(/^#\/audit\/(.+)$/);
+      const m3 = route.match(/^#\/request\/(.+)$/);
+      try {
+        if (m1) {
+          const docs = await window.DocuApi.publicDocs(m1[1]);
+          if (cancelled) return;
+          setStateRaw({ ...def, documents: docs, projects: [], requests: [], config: { ...def.config, publicToken: m1[1] } });
+        } else if (m2) {
+          const res = await window.DocuApi.auditProject(m2[1]);
+          if (cancelled) return;
+          if (!res) { setStateRaw({ ...def, projects: [] }); }
+          else setStateRaw({
+            ...def,
+            documents: res.docs || [],
+            projects: [{ ...res.project, shareToken: m2[1], docIds: (res.docs || []).map(d => d.id) }],
+          });
+        } else if (m3) {
+          const req = await window.DocuApi.requestByToken(m3[1]);
+          if (cancelled) return;
+          setStateRaw({ ...def, requests: req ? [req] : [] });
+        }
+      } catch (e) {
+        console.error("public bootstrap", e);
+      }
+    };
+    bootPublic();
+  }, [useBackend, isPublicRoute, route]);
 
-  const lang = state.config.lang || "es";
+  // Backend bootstrap: load state once authenticated, or show login.
+  useEffect(() => {
+    if (!useBackend || isPublicRoute) return;
+    let cancelled = false;
+    const boot = async () => {
+      const session = await window.DocuApi.getSession();
+      if (cancelled) return;
+      if (!session) { setBootStatus("login"); return; }
+      const next = await window.DocuStore.loadStateFromBackend();
+      if (cancelled) return;
+      if (!next) { setBootStatus("login"); return; }
+      setStateRaw(next);
+      setBootStatus("ready");
+    };
+    boot();
+    const unsub = window.DocuApi.onAuthChange(async (sess) => {
+      if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
+      const next = await window.DocuStore.loadStateFromBackend();
+      if (next) { setStateRaw(next); setBootStatus("ready"); }
+    });
+    return () => { cancelled = true; unsub && unsub(); };
+  }, [useBackend, isPublicRoute]);
+
+  const lang = state?.config?.lang || "es";
   const t = useMemo(() => ({ ...window.TRANSLATIONS[lang], _lang: lang }), [lang]);
 
   useEffect(() => {
@@ -50,6 +108,24 @@ function App() {
     window.parent.postMessage({ type: "__edit_mode_available" }, "*");
     return () => window.removeEventListener("message", onMsg);
   }, []);
+
+  const setState = (updater) => {
+    setStateRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (useBackend && next?.hotelId) window.DocuStore.saveStateToBackend(next);
+      else window.DocuStore.saveState(next);
+      return next;
+    });
+  };
+
+  if (useBackend && !isPublicRoute) {
+    if (bootStatus === "loading") return <window.LoadingScreen label="Cargando datos del hotel…" />;
+    if (bootStatus === "login")   return <window.LoginForm onSignedIn={() => setBootStatus("loading")} />;
+    if (!state)                   return <window.LoadingScreen label="Cargando…" />;
+  }
+  if (useBackend && isPublicRoute && !state) {
+    return <window.LoadingScreen label="Cargando…" />;
+  }
 
   const setLang = (l) => {
     setState(s => ({ ...s, config: { ...s.config, lang: l } }));
@@ -174,7 +250,17 @@ function App() {
             <button key={l} className={l === lang ? "active" : ""} onClick={() => setLang(l)}>{l}</button>
           ))}
         </div>
-        <div className="user-chip" title={currentUser?.email}>
+        <div
+          className="user-chip"
+          title={useBackend ? `${currentUser?.email || ""} — clic para cerrar sesión` : currentUser?.email}
+          onClick={() => {
+            if (!useBackend) return;
+            if (confirm("¿Cerrar sesión?")) {
+              window.DocuApi.signOut().then(() => location.reload());
+            }
+          }}
+          style={useBackend ? { cursor: "pointer" } : undefined}
+        >
           <span className="avatar">{(currentUser?.name || "?").split(" ").map(p => p[0]).slice(0,2).join("")}</span>
           <span>{currentUser?.name}</span>
         </div>

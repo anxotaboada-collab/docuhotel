@@ -109,6 +109,23 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
           <div className="meta-row"><span className="label">{t.documents.endDate}</span><span className="value">{fmtDate(doc.expiryDate)}</span></div>
           <div className="meta-row"><span className="label">{t.common.version}</span><span className="value">v{doc.version}</span></div>
           <div className="meta-row"><span className="label">{t.common.file}</span><span className="value" style={{ wordBreak: 'break-all' }}>{doc.file?.name}</span></div>
+          {doc.file?.key && window.DocuApi && !window.DocuApi.offline && (
+            <div className="meta-row">
+              <span className="label">&nbsp;</span>
+              <span className="value">
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={async () => {
+                    const url = await window.DocuApi.signedUrl(doc.file.key);
+                    if (!url) return;
+                    const a = document.createElement("a");
+                    a.href = url; a.download = doc.file.name || "documento.pdf";
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                  }}
+                >⬇ Descargar PDF original</button>
+              </span>
+            </div>
+          )}
           <div style={{ marginTop: 14, padding: 10, background: 'var(--warn-bg)', color: 'var(--warn)', borderRadius: 6, fontSize: 12 }}>
             ⚠ {t.watermark.line2}
           </div>
