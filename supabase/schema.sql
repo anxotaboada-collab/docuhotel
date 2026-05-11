@@ -39,7 +39,7 @@ language sql stable security definer set search_path = public as $$
   select hotel_id from app_users where id = auth.uid();
 $$;
 
-create or replace function current_role() returns text
+create or replace function current_user_role() returns text
 language sql stable security definer set search_path = public as $$
   select role from app_users where id = auth.uid();
 $$;
@@ -306,15 +306,15 @@ alter table hotel_config    enable row level security;
 drop policy if exists hotels_select on hotels;
 create policy hotels_select on hotels for select using (id = current_hotel_id());
 drop policy if exists hotels_admin_update on hotels;
-create policy hotels_admin_update on hotels for update using (id = current_hotel_id() and current_role() = 'admin');
+create policy hotels_admin_update on hotels for update using (id = current_hotel_id() and current_user_role() = 'admin');
 
 -- app_users: see everyone in your hotel; admins manage.
 drop policy if exists app_users_select on app_users;
 create policy app_users_select on app_users for select using (hotel_id = current_hotel_id());
 drop policy if exists app_users_admin_write on app_users;
 create policy app_users_admin_write on app_users
-  for all using (hotel_id = current_hotel_id() and current_role() = 'admin')
-  with check (hotel_id = current_hotel_id() and current_role() = 'admin');
+  for all using (hotel_id = current_hotel_id() and current_user_role() = 'admin')
+  with check (hotel_id = current_hotel_id() and current_user_role() = 'admin');
 drop policy if exists app_users_self_update on app_users;
 create policy app_users_self_update on app_users for update using (id = auth.uid()) with check (id = auth.uid());
 
@@ -327,7 +327,7 @@ begin
     'projects','email_templates','hotel_config'
   ]) loop
     execute format('drop policy if exists %1$I_select on %1$I; create policy %1$I_select on %1$I for select using (hotel_id = current_hotel_id())', t);
-    execute format('drop policy if exists %1$I_admin_write on %1$I; create policy %1$I_admin_write on %1$I for all using (hotel_id = current_hotel_id() and current_role() in (''admin'',''dept_head'')) with check (hotel_id = current_hotel_id() and current_role() in (''admin'',''dept_head''))', t);
+    execute format('drop policy if exists %1$I_admin_write on %1$I; create policy %1$I_admin_write on %1$I for all using (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head'')) with check (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head''))', t);
   end loop;
 end $$;
 
@@ -337,7 +337,7 @@ create policy documents_select on documents
   for select using (
     hotel_id = current_hotel_id()
     and (
-      current_role() = 'admin'
+      current_user_role() = 'admin'
       or '*' = any(departments)
       or current_departments() && departments
       or '*' = any(current_departments())
@@ -347,16 +347,16 @@ create policy documents_select on documents
 drop policy if exists documents_write on documents;
 create policy documents_write on documents
   for all using (
-    hotel_id = current_hotel_id() and current_role() in ('admin','dept_head')
+    hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head')
   ) with check (
-    hotel_id = current_hotel_id() and current_role() in ('admin','dept_head')
+    hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head')
   );
 
 -- Requests + items + uploads + log: admin/dept_head; public access via share_token handled in client by anon key
 drop policy if exists requests_rw on requests;
 create policy requests_rw on requests
-  for all using (hotel_id = current_hotel_id() and current_role() in ('admin','dept_head'))
-  with check (hotel_id = current_hotel_id() and current_role() in ('admin','dept_head'));
+  for all using (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'))
+  with check (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'));
 
 drop policy if exists request_items_rw on request_items;
 create policy request_items_rw on request_items
@@ -434,7 +434,7 @@ grant execute on function request_log_append(text, text, text) to anon, authenti
 
 drop policy if exists activity_log_select on activity_log;
 create policy activity_log_select on activity_log
-  for select using (hotel_id = current_hotel_id() and current_role() in ('admin','dept_head'));
+  for select using (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'));
 
 drop policy if exists activity_log_insert on activity_log;
 create policy activity_log_insert on activity_log
@@ -442,7 +442,7 @@ create policy activity_log_insert on activity_log
 
 drop policy if exists email_log_select on email_log;
 create policy email_log_select on email_log
-  for select using (hotel_id = current_hotel_id() and current_role() = 'admin');
+  for select using (hotel_id = current_hotel_id() and current_user_role() = 'admin');
 
 drop policy if exists email_log_insert on email_log;
 create policy email_log_insert on email_log

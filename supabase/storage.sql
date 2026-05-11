@@ -45,7 +45,7 @@ create policy "storage_docs_write" on storage.objects
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'docs'
     and split_part(name, '/', 2)::uuid = current_hotel_id()
-    and current_role() in ('admin','dept_head')
+    and current_user_role() in ('admin','dept_head')
   );
 
 drop policy if exists "storage_docs_delete" on storage.objects;
@@ -54,7 +54,7 @@ create policy "storage_docs_delete" on storage.objects
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'docs'
     and split_part(name, '/', 2)::uuid = current_hotel_id()
-    and current_role() = 'admin'
+    and current_user_role() = 'admin'
   );
 
 -- Anonymous uploaders (public request links) can write to requests/{request_id}/...
