@@ -112,10 +112,30 @@
 
   async function getMe() {
     if (offline) return null;
-    const { data: { user } } = await client.auth.getUser();
-    if (!user) return null;
-    const { data: profile, error } = await client.from("app_users").select("*, hotels:hotel_id(*)").eq("id", user.id).single();
-    if (error || !profile) return null;
+    const { data: { user } = {}, error: userErr } = await client.auth.getUser();
+    if (userErr) throw new Error("No se pudo validar la sesión: " + userErr.message);
+    if (!user) return null; // not authenticated → caller shows login
+    const { data: profile, error } = await client
+      .from("app_users")
+      .select("*, hotels:hotel_id(*)")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (error) {
+      throw new Error(
+        "No se pudo leer tu perfil (tabla app_users): " + error.message +
+        (error.hint ? ` — ${error.hint}` : "") +
+        ". Comprueba que el esquema (schema.sql) y las políticas RLS están aplicados en Supabase."
+      );
+    }
+    if (!profile) {
+      throw new Error(
+        `Tu cuenta (${user.email}) no está vinculada a ningún hotel. ` +
+        "Un administrador debe crear la fila correspondiente en app_users (paso 'seed' del despliegue)."
+      );
+    }
+    if (!profile.hotels) {
+      throw new Error("Tu perfil existe pero su hotel_id no apunta a ningún hotel. Revisa la tabla hotels / app_users.");
+    }
     return {
       authUser: user,
       profile,
