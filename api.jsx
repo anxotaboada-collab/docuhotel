@@ -7,10 +7,20 @@
   const cfg = window.DOCUHOTEL_CONFIG || {};
   const offline = !!cfg.offlineMode || !cfg.supabaseUrl || !cfg.supabaseAnonKey || !window.supabase;
 
+  // Supabase v2 serialises auth refresh via navigator.locks, which can hang
+  // indefinitely in iframes / cross-origin contexts / when another tab holds
+  // the lock. We don't coordinate refresh across tabs, so a no-op lock is safe.
+  const noopLock = async (_name, _timeout, fn) => fn();
+
   const client = offline
     ? null
     : window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: false,
+          lock: noopLock,
+        },
       });
 
   // ── Mapping helpers (camelCase ↔ snake_case) ───────────────────────
