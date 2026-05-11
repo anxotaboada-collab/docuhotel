@@ -33,6 +33,20 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
 
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "long", day: "2-digit" }) : "—";
 
+  // Real uploaded PDF (backend mode): resolve a short-lived signed URL to embed.
+  const hasRealFile = !!(doc.file?.key && window.DocuApi && !window.DocuApi.offline);
+  const [pdfUrl, setPdfUrl] = React.useState(null);
+  const [pdfErr, setPdfErr] = React.useState("");
+  React.useEffect(() => {
+    if (!hasRealFile) { setPdfUrl(null); setPdfErr(""); return; }
+    let cancelled = false;
+    setPdfUrl(null); setPdfErr("");
+    window.DocuApi.signedUrl(doc.file.key, 1800)
+      .then(u => { if (cancelled) return; if (u) setPdfUrl(u); else setPdfErr("No se pudo obtener el archivo (¿se subió correctamente?)."); })
+      .catch(e => { if (!cancelled) setPdfErr(e?.message || "Error al cargar el PDF."); });
+    return () => { cancelled = true; };
+  }, [hasRealFile, doc.file?.key]);
+
   // Build watermark line repeated diagonally
   const now = new Date();
   const stamp = now.toLocaleString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB");
@@ -76,6 +90,27 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
     >
       <div className="viewer-shell">
         <div className="viewer-pdf">
+          {hasRealFile ? (
+            <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 600, background: '#525659' }}>
+              {pdfUrl ? (
+                <iframe
+                  title={doc.file?.name || 'PDF'}
+                  src={pdfUrl + '#toolbar=1&navpanes=0'}
+                  style={{ display: 'block', width: '100%', height: '100%', minHeight: 600, border: 'none' }}
+                />
+              ) : pdfErr ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#fca5a5' }}>
+                  <div style={{ marginBottom: 10 }}>⚠ {pdfErr}</div>
+                  <div style={{ fontSize: 12, color: '#cbd5e1' }}>Archivo: {doc.file?.name || '—'}</div>
+                </div>
+              ) : (
+                <div style={{ padding: 40, textAlign: 'center', color: '#cbd5e1' }}>Cargando PDF…</div>
+              )}
+              <div className="wm-overlay" style={{ pointerEvents: 'none' }}>
+                <div className="wm-diagonal">{wmLines}</div>
+              </div>
+            </div>
+          ) : (
           <div className="viewer-page">
             <div className="doc-id">DOC · {doc.id.toUpperCase()} · v{doc.version}</div>
             <h1>{doc.title}</h1>
@@ -97,6 +132,7 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
               <div className="wm-diagonal">{wmLines}</div>
             </div>
           </div>
+          )}
         </div>
         <div className="viewer-side">
           <h4>{t.viewer.meta}</h4>
