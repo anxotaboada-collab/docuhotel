@@ -479,25 +479,53 @@ function RequestSubmitView({ request, state, setState, t, lang, setLang }) {
     reader.readAsDataURL(file);
   };
 
-  const removeFile = (itemId, fileIdx) => {
+  const removeFile = async (itemId, fileIdx) => {
     if (!confirm(t.requests?.confirmRemoveFile || "¿Eliminar este archivo?")) return;
     const item = items.find(it => it.id === itemId);
     const f = item?.files?.[fileIdx];
+    if (window.DocuApi && !window.DocuApi.offline && f?.id) {
+      try {
+        await window.DocuApi.requestDeleteUpload(request.shareToken, f.id);
+        await window.DocuApi.requestLog(request.shareToken, "delete", `${item?.title}: ${f?.name}`);
+      } catch (err) {
+        alert((t.requests?.deleteFailed || "No se pudo eliminar el archivo en el servidor.") + " " + (err?.message || err));
+        return;
+      }
+    }
+    if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch (e) {} }
     const newItems = items.map(it => it.id === itemId ? { ...it, files: it.files.filter((_,i) => i !== fileIdx) } : it);
     persistItems(newItems, { ts: new Date().toISOString(), action: "delete", details: `${item?.title}: ${f?.name}` });
   };
 
-  const saveDraft = () => {
-    setState(s => ({ ...s, requests: s.requests.map(r => r.id === request.id ? { ...r, savedAt: new Date().toISOString(), log: [...(r.log || []), { ts: new Date().toISOString(), action: "save_draft", details: t.requests?.savedDraft || "Guardado como borrador" }] } : r) }));
+  const saveDraft = async () => {
+    if (window.DocuApi && !window.DocuApi.offline) {
+      try {
+        await window.DocuApi.requestSaveProgress(request.shareToken);
+        await window.DocuApi.requestLog(request.shareToken, "save_draft", t.requests?.savedDraft || "Guardado como borrador");
+      } catch (err) {
+        alert((t.requests?.saveFailed || "No se pudo guardar.") + " " + (err?.message || err));
+        return;
+      }
+    }
+    setState(s => ({ ...s, requests: s.requests.map(r => r.id === request.id ? { ...r, savedAt: new Date().toISOString(), status: r.status === "open" ? "saved" : r.status, log: [...(r.log || []), { ts: new Date().toISOString(), action: "save_draft", details: t.requests?.savedDraft || "Guardado como borrador" }] } : r) }));
     alert(t.requests?.savedOk || "Guardado. Puedes volver más tarde con el mismo enlace para seguir subiendo documentos.");
   };
 
-  const submitAll = () => {
+  const submitAll = async () => {
     const missingRequired = items.filter(it => it.required && (!it.files || it.files.length === 0));
     if (missingRequired.length > 0) {
       if (!confirm((t.requests?.missingRequired || "Faltan documentos obligatorios:") + "\n\n" + missingRequired.map(i => "• " + i.title).join("\n") + "\n\n" + (t.requests?.submitAnyway || "¿Enviar de todos modos?"))) return;
     } else {
       if (!confirm(t.requests?.confirmSubmit || "¿Enviar definitivamente? Después no podrás añadir más documentos.")) return;
+    }
+    if (window.DocuApi && !window.DocuApi.offline) {
+      try {
+        await window.DocuApi.requestSubmit(request.shareToken);
+        await window.DocuApi.requestLog(request.shareToken, "submit", t.requests?.submitted || "Envío definitivo");
+      } catch (err) {
+        alert((t.requests?.submitFailed || "No se pudo enviar.") + " " + (err?.message || err));
+        return;
+      }
     }
     setState(s => ({ ...s, requests: s.requests.map(r => r.id === request.id ? { ...r, submittedAt: new Date().toISOString(), status: "submitted", log: [...(r.log || []), { ts: new Date().toISOString(), action: "submit", details: t.requests?.submitted || "Envío definitivo" }] } : r) }));
     setSubmitted(true);

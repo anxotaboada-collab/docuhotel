@@ -6,6 +6,9 @@
   <title>Docuhotel — Gestor de documentos del hotel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <template id="__bundler_thumbnail">
@@ -28,11 +31,24 @@
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- pdf.js (~300 KB) is loaded lazily — only when the document viewer opens. -->
   <script>
-    if (window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    }
+    window.ensurePdfJs = function () {
+      if (window.__pdfjsPromise) return window.__pdfjsPromise;
+      window.__pdfjsPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        s.onload = function () {
+          if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          }
+          resolve(window.pdfjsLib || null);
+        };
+        s.onerror = function () { reject(new Error("pdf.js failed to load")); };
+        document.head.appendChild(s);
+      });
+      return window.__pdfjsPromise;
+    };
   </script>
 
   <!-- Runtime config: create config.js from config.example.js with your Supabase keys. -->
