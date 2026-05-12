@@ -96,9 +96,14 @@ function App() {
       }
     };
     boot();
-    const unsub = window.DocuApi.onAuthChange(async (sess) => {
+    const unsub = window.DocuApi.onAuthChange(async (sess, event) => {
+      // boot() above already handles the initial session replay; background token
+      // refreshes must NOT trigger a full reload (it duplicates the startup work
+      // and would drop any unsaved local edits). Only react to real transitions.
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
       try {
-        if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
+        if (event === "SIGNED_OUT" || !sess) { setBootStatus("login"); setStateRaw(null); return; }
+        setBootStatus("loading");
         const next = await withTimeout(window.DocuStore.loadStateFromBackend(currentHotelIdRef.current || undefined), 45000, "loadState");
         if (next) { setStateRaw(next); setBootStatus("ready"); }
         else { setBootError("No pudimos cargar los datos del hotel."); setBootStatus("error"); }

@@ -154,13 +154,17 @@
     ];
     // activity_log / email_log grow without bound; only the most recent matter.
     const RECENT_LIMIT = 500;
-    const promises = tables.map((t) => {
+    const tableQ = tables.map((t) => {
       const q = client.from(t).select("*").eq("hotel_id", hotelId);
       if (t === "activity_log" || t === "email_log") return q.order("ts", { ascending: false }).limit(RECENT_LIMIT);
       return q;
     });
-    // hotel_config is keyed by hotel_id (PK), still filtered by hotel_id
-    const results = await Promise.all(promises);
+    // First wave — fire everything that doesn't depend on another query at once.
+    const [results, dhRes, reqRes] = await Promise.all([
+      Promise.all(tableQ),
+      client.from("document_hotels").select("document_id, hotel_id"),
+      client.from("requests").select("*").eq("hotel_id", hotelId),
+    ]);
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
     const errs = results.filter((r) => r.error).map((r) => r.error.message);
     if (errs.length) console.warn("[docuhotel] load errors:", errs);
@@ -169,39 +173,38 @@
     // (single row, no duplication). Merge them into the document list.
     let docRows = byTable.documents.slice();
     const sharedByDoc = {};
-    {
-      const { data: dhRows } = await client.from("document_hotels").select("document_id, hotel_id");
-      for (const r of (dhRows || [])) (sharedByDoc[r.document_id] = sharedByDoc[r.document_id] || []).push(r.hotel_id);
-      const haveIds = new Set(docRows.map((d) => d.id));
-      const wantIds = Object.keys(sharedByDoc).filter((id) => (sharedByDoc[id] || []).includes(hotelId) && !haveIds.has(id));
-      if (wantIds.length) {
-        const { data: extra } = await client.from("documents").select("*").in("id", wantIds);
-        docRows = docRows.concat(extra || []);
-      }
-    }
+    for (const r of (dhRes.data || [])) (sharedByDoc[r.document_id] = sharedByDoc[r.document_id] || []).push(r.hotel_id);
+    const haveIds = new Set(docRows.map((d) => d.id));
+    const wantIds = Object.keys(sharedByDoc).filter((id) => (sharedByDoc[id] || []).includes(hotelId) && !haveIds.has(id));
 
-    // Requests need nested fetch
-    const { data: reqRows } = await client.from("requests").select("*").eq("hotel_id", hotelId);
-    let requests = [];
-    if (reqRows?.length) {
-      const reqIds = reqRows.map((r) => r.id);
-      const [{ data: items }, { data: logs }] = await Promise.all([
-        client.from("request_items").select("*").in("request_id", reqIds),
-        client.from("request_log").select("*").in("request_id", reqIds).order("ts", { ascending: true }),
-      ]);
-      const itemIds = (items || []).map((i) => i.id);
-      const { data: uploads } = itemIds.length
-        ? await client.from("request_uploads").select("*").in("request_item_id", itemIds)
-        : { data: [] };
-      requests = reqRows.map((r) =>
-        reqFromRow(
-          r,
-          (items || []).filter((i) => i.request_id === r.id).sort((a, b) => a.sort - b.sort),
-          uploads || [],
-          (logs || []).filter((l) => l.request_id === r.id)
-        )
-      );
-    }
+    // Requests need a nested fetch.
+    const reqRows = reqRes.data || [];
+    const reqIds = reqRows.map((r) => r.id);
+
+    // Second wave — extra shared docs + request items/log, in parallel.
+    const noData = Promise.resolve({ data: [] });
+    const [extraDocsRes, itemsRes, logsRes] = await Promise.all([
+      wantIds.length ? client.from("documents").select("*").in("id", wantIds) : noData,
+      reqIds.length  ? client.from("request_items").select("*").in("request_id", reqIds) : noData,
+      reqIds.length  ? client.from("request_log").select("*").in("request_id", reqIds).order("ts", { ascending: true }) : noData,
+    ]);
+    if (extraDocsRes.data?.length) docRows = docRows.concat(extraDocsRes.data);
+    const items = itemsRes.data || [];
+    const logs = logsRes.data || [];
+
+    // Third wave — request uploads (needs item ids).
+    const itemIds = items.map((i) => i.id);
+    const { data: uploads } = itemIds.length
+      ? await client.from("request_uploads").select("*").in("request_item_id", itemIds)
+      : { data: [] };
+    const requests = reqRows.map((r) =>
+      reqFromRow(
+        r,
+        items.filter((i) => i.request_id === r.id).sort((a, b) => a.sort - b.sort),
+        uploads || [],
+        logs.filter((l) => l.request_id === r.id)
+      )
+    );
 
     const hotelCfg = byTable.hotel_config[0]?.data || {};
 
@@ -588,7 +591,7 @@
   }
   function onAuthChange(cb) {
     if (offline) return () => {};
-    const { data } = client.auth.onAuthStateChange((_evt, session) => cb(session));
+    const { data } = client.auth.onAuthStateChange((evt, session) => cb(session, evt));
     return () => data.subscription.unsubscribe();
   }
 
