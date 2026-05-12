@@ -523,6 +523,36 @@
     return data || [];
   }
 
+  // Create a brand-new user: an Auth account (via signUp on a throwaway client
+  // so it doesn't touch the current session) + the matching app_users row.
+  // The caller must be a hotel admin (for their hotel) or a regional admin.
+  async function createAppUser({ email, password, name, hotelId, role, departments, isRegional } = {}) {
+    if (offline) throw new Error("No disponible en modo offline.");
+    const em = String(email || "").trim().toLowerCase();
+    if (!em) throw new Error("Email obligatorio.");
+    if (!password || String(password).length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres.");
+    if (!hotelId) throw new Error("Selecciona un hotel.");
+    const c = window.DOCUHOTEL_CONFIG || {};
+    const tmp = window.supabase.createClient(c.supabaseUrl, c.supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await tmp.auth.signUp({ email: em, password });
+    if (error) throw error;
+    const u = data?.user;
+    if (!u?.id) throw new Error("No se pudo crear la cuenta de acceso.");
+    if (Array.isArray(u.identities) && u.identities.length === 0) {
+      throw new Error("Ya existe una cuenta con ese email.");
+    }
+    const { error: e2 } = await client.from("app_users").insert({
+      id: u.id, hotel_id: hotelId, name: (name || em).trim(), email: em,
+      role: role || "employee",
+      departments: (departments && departments.length) ? departments : ["*"],
+      is_regional: !!isRegional,
+    });
+    if (e2) throw e2;
+    return { id: u.id, email: em, needsEmailConfirm: !data?.session };
+  }
+
   async function getUserHotels(userId) {
     if (offline) return [];
     const { data } = await client.from("user_hotels").select("hotel_id").eq("user_id", userId);
@@ -573,7 +603,7 @@
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
     createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
-    listAllUsers, getUserHotels, setUserAccess,
+    listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
   };
 })();
