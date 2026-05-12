@@ -32,41 +32,30 @@ function PublicView({ state, t, lang, setLang }) {
             <div className="page-sub">{docs.length} {t.common.total.toLowerCase()}</div>
           </div>
         </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t.documents.table.title}</th>
-                <th>{t.documents.table.category}</th>
-                <th>{t.documents.table.expiry}</th>
-                <th style={{ textAlign: "right", width: 120 }}>{t.documents.table.actions}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {docs.length === 0 && <tr><td colSpan={4}><div className="empty-state">{t.common.empty}</div></td></tr>}
-              {docs.map(d => {
-                const cat = state.categories.find(c => c.id === d.categoryId);
-                return (
-                  <tr key={d.id}>
-                    <td>
-                      <div className="doc-title">
-                        <Icon.doc style={{ color: 'var(--muted)' }} />
-                        <div>
-                          <div>{d.title}</div>
-                          <div className="doc-meta">{d.file.name} · {fmtSize(d.file.size)} · v{d.version}</div>
-                        </div>
+        {docs.length === 0 && <div className="empty-state">{t.common.empty}</div>}
+        <div className="public-doc-list">
+          {docs.map(d => {
+            const cat = state.categories.find(c => c.id === d.categoryId);
+            return (
+              <div key={d.id} className="public-doc-card">
+                <div className="public-doc-main">
+                  <div className="doc-title">
+                    <Icon.doc style={{ color: 'var(--muted)', flexShrink: 0 }} />
+                    <div>
+                      <div className="public-doc-name">{d.title}</div>
+                      <div className="doc-meta">
+                        {(cat?.name ? cat.name + " · " : "")}{t.documents.table.expiry}: {fmtDate(d.expiryDate)} · v{d.version}
                       </div>
-                    </td>
-                    <td>{cat?.name || "—"}</td>
-                    <td>{fmtDate(d.expiryDate)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="icon-btn" onClick={() => setOpenDoc(d)}><Icon.eye /></button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <div className="doc-meta">{d.file.name} · {fmtSize(d.file.size)}</div>
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-primary public-doc-view" onClick={() => setOpenDoc(d)}>
+                  <Icon.eye /> {t.common.view || "Ver"}
+                </button>
+              </div>
+            );
+          })}
         </div>
         <div style={{ marginTop: 18, padding: 12, background: 'var(--bg-soft)', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12.5, color: 'var(--muted)' }}>
           ◈ {t.watermark.line2}
