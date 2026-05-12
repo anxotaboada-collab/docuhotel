@@ -68,15 +68,15 @@ function App() {
   // Backend bootstrap: load state once authenticated, or show login.
   const [bootError, setBootError] = useState("");
   const [bootRetry, setBootRetry] = useState(0);
+  const currentHotelIdRef = useRef(null);
+  useEffect(() => { currentHotelIdRef.current = state?.hotelId || null; }, [state?.hotelId]);
+  const withTimeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} timeout`)), ms)),
+  ]);
   useEffect(() => {
     if (!useBackend || isPublicRoute) return;
     let cancelled = false;
-    // Safety net: if Supabase hangs (storage adapter / network), don't keep
-    // spinning forever — surface an error so the user can retry or sign in.
-    const withTimeout = (p, ms, label) => Promise.race([
-      p,
-      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} timeout`)), ms)),
-    ]);
     const boot = async () => {
       try {
         const session = await withTimeout(window.DocuApi.getSession(), 30000, "getSession");
@@ -98,7 +98,7 @@ function App() {
     const unsub = window.DocuApi.onAuthChange(async (sess) => {
       try {
         if (!sess) { setBootStatus("login"); setStateRaw(null); return; }
-        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 45000, "loadState");
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(currentHotelIdRef.current || undefined), 45000, "loadState");
         if (next) { setStateRaw(next); setBootStatus("ready"); }
         else { setBootError("No pudimos cargar los datos del hotel."); setBootStatus("error"); }
       } catch (e) {
@@ -109,6 +109,19 @@ function App() {
     });
     return () => { cancelled = true; unsub && unsub(); };
   }, [useBackend, isPublicRoute, bootRetry]);
+
+  // Switch to another hotel the user can access (regional / multi-hotel).
+  const switchHotel = async (hid) => {
+    if (!useBackend || !hid || hid === state?.hotelId) return;
+    setBootError(""); setBootStatus("loading");
+    try {
+      const next = await withTimeout(window.DocuStore.loadStateFromBackend(hid), 45000, "loadState");
+      if (next) { setTab("documents"); setStateRaw(next); setBootStatus("ready"); }
+      else { setBootError("No se pudo cargar ese hotel."); setBootStatus("error"); }
+    } catch (e) {
+      setBootError(e?.message || "Error al cambiar de hotel."); setBootStatus("error");
+    }
+  };
 
   const lang = state?.config?.lang || "es";
   const t = useMemo(() => ({ ...window.TRANSLATIONS[lang], _lang: lang }), [lang]);
@@ -243,14 +256,30 @@ function App() {
         <div className="brand">
           <span className="brand-mark">DH</span>
           <span className="brand-name">{t.appName}</span>
-          <span className="brand-tag">— {t.appTagline}</span>
         </div>
+        {useBackend && (state.config?.accessibleHotels?.length > 1 || state.config?.isRegional) ? (
+          <select
+            className="hotel-switch"
+            value={state.hotelId}
+            title="Cambiar de hotel"
+            onChange={(e) => switchHotel(e.target.value)}
+          >
+            {(state.config.accessibleHotels || []).map(h => (
+              <option key={h.id} value={h.id}>🏨 {h.name}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="brand-tag current-hotel-name">— {state.config?.hotel?.name || t.appTagline}</span>
+        )}
         <nav className="tabs">
           <button className={`tab ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>{t.nav.documents}</button>
           <button className={`tab ${tab === "projects" ? "active" : ""}`} onClick={() => setTab("projects")}>{t.nav.projects || "Proyectos"}</button>
           <button className={`tab ${tab === "requests" ? "active" : ""}`} onClick={() => setTab("requests")}>{t.nav.requests || "Solicitudes"}</button>
           <button className={`tab ${tab === "log" ? "active" : ""}`} onClick={() => setTab("log")}>{t.nav.log}</button>
           <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>{t.nav.admin}</button>
+          {state.config?.isRegional && (
+            <button className={`tab ${tab === "regional" ? "active" : ""}`} onClick={() => setTab("regional")}>🌐 Regional</button>
+          )}
         </nav>
         <button
           className="btn btn-sm"
@@ -298,6 +327,9 @@ function App() {
         )}
         {tab === "log" && <LogPage state={state} t={t} lang={lang} />}
         {tab === "admin" && <AdminPage state={state} setState={setState} t={t} lang={lang} log={log} />}
+        {tab === "regional" && state.config?.isRegional && (
+          <window.RegionalPanel state={state} t={t} lang={lang} switchHotel={switchHotel} pushToast={pushToast} />
+        )}
         {tab === "projects" && <window.ProjectsPage state={state} setState={setState} t={t} lang={lang} log={log} openViewer={openViewer} />}
         {tab === "requests" && <window.RequestsPage state={state} setState={setState} t={t} lang={lang} log={log} />}
       </main>

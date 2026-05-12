@@ -476,13 +476,18 @@ function daysUntil(iso) {
 // debounce-write changes back. The rest of the app keeps using setState +
 // saveState transparently.
 
-async function loadStateFromBackend() {
+async function loadStateFromBackend(targetHotelId) {
   if (!window.DocuApi || window.DocuApi.offline) return loadState();
   // Note: we intentionally do NOT swallow errors here — getMe()/loadFullState()
   // throw with a descriptive message that the boot screen surfaces to the user.
   const me = await window.DocuApi.getMe();
   if (!me) return null; // not authenticated → caller will show login
-  const s = await window.DocuApi.loadFullState(me.hotel.id);
+  const accessible = await window.DocuApi.listAccessibleHotels();
+  const wanted = targetHotelId && accessible.find((h) => h.id === targetHotelId) ? targetHotelId : me.hotel.id;
+  const loadedHotel = accessible.find((h) => h.id === wanted) || {
+    id: me.hotel.id, name: me.hotel.name, country: me.hotel.country, timezone: me.hotel.timezone, publicToken: me.hotel.public_token,
+  };
+  const s = await window.DocuApi.loadFullState(wanted);
   if (!s) return null;
   // Bridge: populate config with auth-derived currentUserId + public token.
   const def = defaultState().config;
@@ -493,12 +498,15 @@ async function loadStateFromBackend() {
     emailTemplates: (s.config?.emailTemplates?.length ? s.config.emailTemplates : def.emailTemplates),
     currentUserId: me.authUser.id,
     lang: s.config?.lang || "es",
-    publicToken: me.hotel.public_token,
+    publicToken: loadedHotel.publicToken,
     hotel: {
-      name: me.hotel.name,
-      country: me.hotel.country,
-      timezone: me.hotel.timezone,
+      name: loadedHotel.name,
+      country: loadedHotel.country,
+      timezone: loadedHotel.timezone,
     },
+    isRegional: !!me.profile.is_regional,
+    myHotelId: me.hotel.id,
+    accessibleHotels: accessible,
   };
   // Ensure we always have at least the authenticated user in the list, even
   // if the app_users row hasn't been fetched yet.
