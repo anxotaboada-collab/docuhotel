@@ -1,5 +1,5 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npm install && npm run build",
   "outputDirectory": ".",
   "framework": null,
   "cleanUrls": true,
@@ -21,10 +21,9 @@
       ]
     },
     {
-      "source": "/(.*).jsx",
+      "source": "/docuhotel.bundle.js",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" },
-        { "key": "Content-Type", "value": "text/babel; charset=utf-8" }
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
       ]
     },
     {

@@ -1,0 +1,13 @@
+{
+  "name": "docuhotel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Docuhotel — hotel document manager",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

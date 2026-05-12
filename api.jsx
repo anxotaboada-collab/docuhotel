@@ -349,6 +349,18 @@
     return { key, name: file.name, size: file.size, mime: file.type };
   }
 
+  // Server-side copy of an existing object into the hotel's docs/ tree, so a
+  // request upload can be promoted to a Document without re-uploading bytes and
+  // keeps working even if the original request is later deleted.
+  async function copyToDocsPath(hotelId, srcKey, fileName) {
+    if (offline || !srcKey || !hotelId) return null;
+    const safe = (fileName || "documento.pdf").replace(/[^\w.\-]+/g, "_");
+    const key = `docs/${hotelId}/imports/${Date.now()}_${safe}`;
+    const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").copy(srcKey, key);
+    if (error) throw error;
+    return key;
+  }
+
   async function uploadRequestFile(requestId, itemId, uploadId, file) {
     if (offline) return null;
     const safe = file.name.replace(/[^\w.\-]+/g, "_");
@@ -523,7 +535,7 @@
     client,
     getSession, getMe,
     loadFullState, saveDiff,
-    uploadDocFile, uploadRequestFile, signedUrl, deleteFile,
+    uploadDocFile, uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
     listAllUsers, getUserHotels, setUserAccess,

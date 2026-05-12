@@ -242,9 +242,9 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
   );
 }
 
-function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
+function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initialTitle }) {
   const isNew = !doc;
-  const [title, setTitle] = React.useState(doc?.title || "");
+  const [title, setTitle] = React.useState(doc?.title || initialTitle || "");
   const [description, setDescription] = React.useState(doc?.description || "");
   const [categoryId, setCategoryId] = React.useState(doc?.categoryId || state.categories[0]?.id || "");
   const [statusId, setStatusId] = React.useState(doc?.statusId || state.statuses.find(s => s.key === "draft")?.id || state.statuses[0]?.id);
@@ -254,7 +254,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
   const [periodId, setPeriodId] = React.useState(doc?.periodId || state.periods.find(p => p.months === 12)?.id || state.periods[0]?.id);
   const [startDate, setStartDate] = React.useState(doc?.startDate?.slice(0,10) || new Date().toISOString().slice(0,10));
   const [manualExpiry, setManualExpiry] = React.useState(doc?.expiryDate?.slice(0,10) || "");
-  const [file, setFile] = React.useState(doc?.file || null);
+  const [file, setFile] = React.useState(doc?.file || initialFile || null);
   const [error, setError] = React.useState("");
   const fileRef = React.useRef();
 
@@ -370,16 +370,14 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
             <span className="help">{t.documents.publicWarning}</span>
           </div>
           <div className="field full">
-            <label>{t.common.responsibles} <span className="help">— jefes de los departamentos asignados</span></label>
-            <div className="multi-select-box" style={{ background: 'var(--bg-soft)' }}>
-              {(() => {
-                const heads = state.users.filter(u => u.role === "dept_head" && (
-                  departments.includes("*") || u.departments.includes("*") || u.departments.some(d => departments.includes(d))
-                ));
-                if (heads.length === 0) return <span style={{ color: 'var(--muted)', fontSize: 12.5, padding: '4px 6px' }}>{t.common.none}</span>;
-                return heads.map(u => <span key={u.id} className="chip">{u.name} · {u.email}</span>);
-              })()}
-            </div>
+            <label>{t.common.responsibles}</label>
+            {state.responsibles.length === 0 ? (
+              <div className="multi-select-box" style={{ background: 'var(--bg-soft)' }}>
+                <span style={{ color: 'var(--muted)', fontSize: 12.5, padding: '4px 6px' }}>{t.common.none}</span>
+              </div>
+            ) : (
+              <ToggleChips items={state.responsibles} value={responsibleIds} onChange={setResponsibleIds} getLabel={r => r.email ? `${r.name} · ${r.email}` : r.name} />
+            )}
           </div>
           <div className="field">
             <label>{t.documents.validityPeriod}</label>
@@ -421,3 +419,4 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
 }
 
 window.DocumentsPage = DocumentsPage;
+window.DocumentForm = DocumentForm;
