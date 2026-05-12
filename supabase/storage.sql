@@ -80,10 +80,7 @@ create policy "storage_public_docs_read" on storage.objects
   for select using (
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'docs'
-    and exists (
-      select 1 from documents d
-      where d.file_key = name and d.public_access = true
-    )
+    and is_public_doc_file(name)   -- SECURITY DEFINER helper (see schema.sql)
   );
 
 -- Authenticated users in a hotel can read their hotel's request uploads
