@@ -152,9 +152,13 @@
       "categories","departments","statuses","periods","responsibles",
       "app_users","documents","projects","email_templates","activity_log","email_log","hotel_config"
     ];
-    const promises = tables.map((t) =>
-      client.from(t).select("*").eq("hotel_id", hotelId)
-    );
+    // activity_log / email_log grow without bound; only the most recent matter.
+    const RECENT_LIMIT = 500;
+    const promises = tables.map((t) => {
+      const q = client.from(t).select("*").eq("hotel_id", hotelId);
+      if (t === "activity_log" || t === "email_log") return q.order("ts", { ascending: false }).limit(RECENT_LIMIT);
+      return q;
+    });
     // hotel_config is keyed by hotel_id (PK), still filtered by hotel_id
     const results = await Promise.all(promises);
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
@@ -210,7 +214,7 @@
       responsibles:byTable.responsibles.map((r) => ({ id: r.id, name: r.name, email: r.email })),
       users:       byTable.app_users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, departments: u.departments || [] })),
       documents:   docRows.map((d) => ({ ...docFromRow(d), sharedHotelIds: sharedByDoc[d.id] || [] })),
-      projects:    [], // filled below
+      projects:    byTable.projects.map(projFromRow),
       requests,
       log:         byTable.activity_log
                      .sort((a, b) => new Date(b.ts) - new Date(a.ts))
@@ -229,7 +233,6 @@
           name: t.name, subject: t.subject, body: t.body,
         })),
       },
-      _projects_raw: byTable, // not used; safe to ignore
     };
   }
 
