@@ -242,9 +242,9 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
   );
 }
 
-function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
+function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initialTitle }) {
   const isNew = !doc;
-  const [title, setTitle] = React.useState(doc?.title || "");
+  const [title, setTitle] = React.useState(doc?.title || initialTitle || "");
   const [description, setDescription] = React.useState(doc?.description || "");
   const [categoryId, setCategoryId] = React.useState(doc?.categoryId || state.categories[0]?.id || "");
   const [statusId, setStatusId] = React.useState(doc?.statusId || state.statuses.find(s => s.key === "draft")?.id || state.statuses[0]?.id);
@@ -254,7 +254,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
   const [periodId, setPeriodId] = React.useState(doc?.periodId || state.periods.find(p => p.months === 12)?.id || state.periods[0]?.id);
   const [startDate, setStartDate] = React.useState(doc?.startDate?.slice(0,10) || new Date().toISOString().slice(0,10));
   const [manualExpiry, setManualExpiry] = React.useState(doc?.expiryDate?.slice(0,10) || "");
-  const [file, setFile] = React.useState(doc?.file || null);
+  const [file, setFile] = React.useState(doc?.file || initialFile || null);
   const [error, setError] = React.useState("");
   const fileRef = React.useRef();
 
@@ -419,3 +419,4 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose }) {
 }
 
 window.DocumentsPage = DocumentsPage;
+window.DocumentForm = DocumentForm;

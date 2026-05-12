@@ -173,6 +173,26 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
   const [maxFileSizeMb, setMaxFileSizeMb] = React.useState(request?.maxFileSizeMb || 10);
   const [shareToken, setShareToken] = React.useState(request?.shareToken || "");
   const [copied, setCopied] = React.useState(false);
+  const [sendToDocs, setSendToDocs] = React.useState(null); // { name, size, mime, key, dataUrl, title }
+  const [promoting, setPromoting] = React.useState(false);
+
+  const openUploaded = async (f) => {
+    let href = f.dataUrl;
+    if (!href && f.key && window.DocuApi && !window.DocuApi.offline) href = await window.DocuApi.signedUrl(f.key);
+    if (!href) { alert(t.requests?.cannotOpen || "No se pudo abrir el archivo."); return; }
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+  const sendFileToDocs = async (f, itemTitle) => {
+    if (promoting) return;
+    let key = f.key || null;
+    if (key && window.DocuApi && !window.DocuApi.offline) {
+      setPromoting(true);
+      try { key = (await window.DocuApi.copyToDocsPath(state.hotelId, f.key, f.name)) || f.key; }
+      catch (e) { console.error("copyToDocsPath", e); key = f.key; }
+      setPromoting(false);
+    }
+    setSendToDocs({ name: f.name, size: f.size, mime: f.mime || f.type || "application/pdf", key, dataUrl: f.dataUrl || null, title: itemTitle });
+  };
 
   const addItem = () => setItems(it => [...it, { id: "it_" + Math.random().toString(36).slice(2,7), title: "", comments: "", required: false, files: [] }]);
   const removeItem = (id) => setItems(it => it.filter(x => x.id !== id));
@@ -302,8 +322,14 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
                   </div>
                   <textarea className="textarea" rows={2} value={it.comments} onChange={e => updateItem(it.id, { comments: e.target.value })} placeholder={t.requests?.commentsPh || "Comentarios / instrucciones (opcional)"} disabled={submittedReadonly} style={{ fontSize: 12.5 }} />
                   {(it.files || []).length > 0 && (
-                    <div style={{ marginTop: 8, padding: 8, background: 'var(--bg)', borderRadius: 6, fontSize: 12 }}>
-                      <strong>{t.requests?.uploaded || "Subido"}:</strong> {it.files.map(f => f.name).join(", ")}
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {it.files.map((f, fi) => (
+                        <div key={fi} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg)', borderRadius: 6, fontSize: 12 }}>
+                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📄 {f.name} <span style={{ color: 'var(--muted)' }}>· {((f.size||0)/1024).toFixed(0)} KB</span></span>
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={() => openUploaded(f)}>👁 {t.requests?.viewFile || t.common?.preview || "Ver"}</button>
+                          <button type="button" className="btn btn-sm" disabled={promoting} onClick={() => sendFileToDocs(f, it.title)}>➕ {t.requests?.sendToDocs || "Enviar a documentos"}</button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -373,6 +399,28 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
           )}
         </div>
       </div>
+
+      {promoting && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60, fontSize: 14 }}>
+          <div style={{ background: 'var(--bg)', padding: '14px 22px', borderRadius: 10 }}>{t.requests?.sendingToDocs || "Preparando documento…"}</div>
+        </div>
+      )}
+
+      {sendToDocs && window.DocumentForm && (
+        <window.DocumentForm
+          state={state} t={t} lang={lang}
+          doc={null}
+          initialFile={{ name: sendToDocs.name, size: sendToDocs.size, mime: sendToDocs.mime, key: sendToDocs.key, dataUrl: sendToDocs.dataUrl }}
+          initialTitle={sendToDocs.title}
+          onSave={(newDoc) => {
+            setState(s => ({ ...s, documents: [newDoc, ...s.documents] }));
+            log && log("doc_create", newDoc.title);
+            setSendToDocs(null);
+            alert(t.requests?.sentToDocsOk || "Documento añadido a la sección Documentos.");
+          }}
+          onClose={() => setSendToDocs(null)}
+        />
+      )}
     </div>
   );
 }
