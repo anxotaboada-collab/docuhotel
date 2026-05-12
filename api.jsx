@@ -113,8 +113,18 @@
 
   async function getMe() {
     if (offline) return null;
-    const { data: { user } = {}, error: userErr } = await client.auth.getUser();
-    if (userErr) throw new Error("No se pudo validar la sesión: " + userErr.message);
+    // Use the cached session (a local read, no network round-trip) instead of
+    // auth.getUser() — which hits GoTrue's /user endpoint every time and is a
+    // big chunk of the login latency. Fall back to getUser() only when there is
+    // no cached session, so an expired/missing token still surfaces cleanly.
+    let user = null;
+    const { data: sessData } = await client.auth.getSession();
+    user = sessData?.session?.user || null;
+    if (!user) {
+      const { data: { user: u } = {}, error: userErr } = await client.auth.getUser();
+      if (userErr) throw new Error("No se pudo validar la sesión: " + userErr.message);
+      user = u || null;
+    }
     if (!user) return null; // not authenticated → caller shows login
     const { data: profile, error } = await client
       .from("app_users")
@@ -148,6 +158,8 @@
 
   async function loadFullState(hotelId) {
     if (offline) return null;
+    const _t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const _perf = (label) => console.info(`[docuhotel] loadFullState ${label}: ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - _t0)}ms`);
     const tables = [
       "categories","departments","statuses","periods","responsibles",
       "app_users","documents","projects","email_templates","activity_log","email_log","hotel_config"
@@ -162,9 +174,13 @@
     // First wave — fire everything that doesn't depend on another query at once.
     const [results, dhRes, reqRes] = await Promise.all([
       Promise.all(tableQ),
-      client.from("document_hotels").select("document_id, hotel_id"),
+      // Only the rows that share a document INTO this hotel — not every
+      // document_hotels row in the system (RLS already scopes this to hotels
+      // the user can access, but a regional admin can access all of them).
+      client.from("document_hotels").select("document_id, hotel_id").eq("hotel_id", hotelId),
       client.from("requests").select("*").eq("hotel_id", hotelId),
     ]);
+    _perf("wave 1");
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
     const errs = results.filter((r) => r.error).map((r) => r.error.message);
     if (errs.length) console.warn("[docuhotel] load errors:", errs);
@@ -188,6 +204,7 @@
       reqIds.length  ? client.from("request_items").select("*").in("request_id", reqIds) : noData,
       reqIds.length  ? client.from("request_log").select("*").in("request_id", reqIds).order("ts", { ascending: true }) : noData,
     ]);
+    _perf("wave 2");
     if (extraDocsRes.data?.length) docRows = docRows.concat(extraDocsRes.data);
     const items = itemsRes.data || [];
     const logs = logsRes.data || [];
@@ -206,6 +223,7 @@
       )
     );
 
+    _perf("wave 3 (done)");
     const hotelCfg = byTable.hotel_config[0]?.data || {};
 
     return {
