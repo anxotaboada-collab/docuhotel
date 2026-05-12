@@ -91,12 +91,11 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
       <div className="viewer-shell">
         <div className="viewer-pdf">
           {hasRealFile ? (
-            <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 600, background: '#525659' }}>
+            <div className="viewer-pdf-frame">
               {pdfUrl ? (
                 <iframe
                   title={doc.file?.name || 'PDF'}
                   src={pdfUrl + '#toolbar=1&navpanes=0'}
-                  style={{ display: 'block', width: '100%', height: '100%', minHeight: 600, border: 'none' }}
                 />
               ) : pdfErr ? (
                 <div style={{ padding: 40, textAlign: 'center', color: '#fca5a5' }}>

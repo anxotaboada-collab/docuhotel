@@ -404,6 +404,17 @@ as $fn$
 $fn$;
 grant execute on function public_documents(text) to anon, authenticated;
 
+-- Used by the Storage policy below: tells whether a storage object path belongs
+-- to a document flagged public_access. SECURITY DEFINER so it isn't blocked by
+-- the documents table's own RLS (anon cannot SELECT documents directly).
+create or replace function is_public_doc_file(p_name text)
+returns boolean
+language sql stable security definer set search_path = public
+as $fn$
+  select exists (select 1 from documents where file_key = p_name and public_access = true);
+$fn$;
+grant execute on function is_public_doc_file(text) to anon, authenticated;
+
 -- Project audit: validate share token and return docs.
 create function audit_project(p_token text)
 returns table(project jsonb, docs jsonb)
