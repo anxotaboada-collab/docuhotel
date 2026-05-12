@@ -17,6 +17,7 @@
 
   const docFromRow = (r) => ({
     id: r.id,
+    hotelId: r.hotel_id,
     title: r.title,
     description: r.description || "",
     categoryId: r.category_id,
@@ -38,7 +39,7 @@
 
   const docToRow = (d, hotelId) => ({
     id: d.id,
-    hotel_id: hotelId,
+    hotel_id: d.hotelId || hotelId,
     title: d.title,
     description: d.description || "",
     category_id: d.categoryId || null,
@@ -160,6 +161,21 @@
     const errs = results.filter((r) => r.error).map((r) => r.error.message);
     if (errs.length) console.warn("[docuhotel] load errors:", errs);
 
+    // Regional/corporate documents shared into this hotel via document_hotels
+    // (single row, no duplication). Merge them into the document list.
+    let docRows = byTable.documents.slice();
+    const sharedByDoc = {};
+    {
+      const { data: dhRows } = await client.from("document_hotels").select("document_id, hotel_id");
+      for (const r of (dhRows || [])) (sharedByDoc[r.document_id] = sharedByDoc[r.document_id] || []).push(r.hotel_id);
+      const haveIds = new Set(docRows.map((d) => d.id));
+      const wantIds = Object.keys(sharedByDoc).filter((id) => (sharedByDoc[id] || []).includes(hotelId) && !haveIds.has(id));
+      if (wantIds.length) {
+        const { data: extra } = await client.from("documents").select("*").in("id", wantIds);
+        docRows = docRows.concat(extra || []);
+      }
+    }
+
     // Requests need nested fetch
     const { data: reqRows } = await client.from("requests").select("*").eq("hotel_id", hotelId);
     let requests = [];
@@ -193,7 +209,7 @@
       periods:     byTable.periods.map((p) => ({ id: p.id, months: p.months, manual: !!p.manual, label: p.label })),
       responsibles:byTable.responsibles.map((r) => ({ id: r.id, name: r.name, email: r.email })),
       users:       byTable.app_users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, departments: u.departments || [] })),
-      documents:   byTable.documents.map(docFromRow),
+      documents:   docRows.map((d) => ({ ...docFromRow(d), sharedHotelIds: sharedByDoc[d.id] || [] })),
       projects:    [], // filled below
       requests,
       log:         byTable.activity_log
@@ -268,13 +284,11 @@
     // Requests: nested. Replace items per-request only if the request was touched.
     await persistRequests(hotelId, prev?.requests, next.requests);
 
-    // hotel_config (jsonb blob without emailLog/emailTemplates)
-    const cfgCopy = { ...(next.config || {}) };
-    delete cfgCopy.emailLog;
-    delete cfgCopy.emailTemplates;
-    const prevCfgCopy = { ...(prev?.config || {}) };
-    delete prevCfgCopy.emailLog;
-    delete prevCfgCopy.emailTemplates;
+    // hotel_config (jsonb blob — strip runtime/auth-derived fields)
+    const RUNTIME_CFG = ["emailLog","emailTemplates","isRegional","myHotelId","accessibleHotels"];
+    const strip = (c) => { const o = { ...(c || {}) }; RUNTIME_CFG.forEach((k) => delete o[k]); return o; };
+    const cfgCopy = strip(next.config);
+    const prevCfgCopy = strip(prev?.config);
     if (JSON.stringify(cfgCopy) !== JSON.stringify(prevCfgCopy)) {
       const { error } = await client.from("hotel_config").upsert({ hotel_id: hotelId, data: cfgCopy }, { onConflict: "hotel_id" });
       if (error) console.error("[hotel_config] upsert", error);
@@ -396,6 +410,94 @@
     await client.rpc("request_log_append", { p_token: token, p_action: action, p_details: details || "" });
   }
 
+  // ── Regional / multi-hotel ──────────────────────────────────────────
+
+  // Hotels the current user can access (RLS: all of them for a regional admin,
+  // else their primary hotel + any rows in user_hotels).
+  async function listAccessibleHotels() {
+    if (offline) return [];
+    const { data, error } = await client.from("hotels").select("*").order("name");
+    if (error) { console.error("listAccessibleHotels", error); return []; }
+    return (data || []).map((h) => ({ id: h.id, name: h.name, country: h.country, timezone: h.timezone, publicToken: h.public_token }));
+  }
+
+  // Upload a single regional/corporate document visible in all given hotels.
+  async function regionalUpload({ file, fields, hotelIds }) {
+    if (offline) throw new Error("offline mode");
+    if (!hotelIds || !hotelIds.length) throw new Error("Selecciona al menos un hotel.");
+    const { data: { user } = {} } = await client.auth.getUser();
+    const docId = "doc_reg_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const ownerHotel = hotelIds[0];
+    let fileMeta = null;
+    if (file) {
+      const safe = file.name.replace(/[^\w.\-]+/g, "_");
+      const key = `docs/${ownerHotel}/${docId}/${Date.now()}_${safe}`;
+      const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
+        cacheControl: "3600", upsert: false, contentType: file.type || "application/pdf",
+      });
+      if (error) throw error;
+      fileMeta = { key, name: file.name, size: file.size, mime: file.type };
+    }
+    const row = {
+      id: docId, hotel_id: ownerHotel,
+      title: fields.title, description: fields.description || "",
+      category_id: fields.categoryId || null, status_id: fields.statusId || null, period_id: fields.periodId || null,
+      departments: ["*"], responsible_ids: [],
+      start_date: fields.startDate || null, expiry_date: fields.expiryDate || null,
+      version: 1, public_access: !!fields.publicAccess, linked_doc_ids: [],
+      file_key: fileMeta?.key || null, file_name: fileMeta?.name || null, file_size: fileMeta?.size || null, file_mime: fileMeta?.mime || null,
+      uploaded_by: user?.id || null, uploaded_at: new Date().toISOString(),
+    };
+    { const { error } = await client.from("documents").insert(row); if (error) throw error; }
+    { const { error } = await client.from("document_hotels").insert(hotelIds.map((h) => ({ document_id: docId, hotel_id: h }))); if (error) throw error; }
+    await client.from("regional_uploads").insert({ document_id: docId, uploaded_by: user?.id || null, title: fields.title, hotel_ids: hotelIds });
+    return docId;
+  }
+
+  async function updateRegionalDocHotels(docId, hotelIds) {
+    if (offline) return;
+    await client.from("document_hotels").delete().eq("document_id", docId);
+    if (hotelIds && hotelIds.length) {
+      const { error } = await client.from("document_hotels").insert(hotelIds.map((h) => ({ document_id: docId, hotel_id: h })));
+      if (error) throw error;
+    }
+  }
+
+  async function listRegionalUploads() {
+    if (offline) return [];
+    const { data, error } = await client.from("regional_uploads").select("*").order("created_at", { ascending: false });
+    if (error) { console.error("listRegionalUploads", error); return []; }
+    return data || [];
+  }
+
+  async function listAllUsers() {
+    if (offline) return [];
+    const { data, error } = await client.from("app_users").select("*").order("name");
+    if (error) { console.error("listAllUsers", error); return []; }
+    return data || [];
+  }
+
+  async function getUserHotels(userId) {
+    if (offline) return [];
+    const { data } = await client.from("user_hotels").select("hotel_id").eq("user_id", userId);
+    return (data || []).map((r) => r.hotel_id);
+  }
+
+  async function setUserAccess(userId, { isRegional, hotelIds } = {}) {
+    if (offline) return;
+    if (typeof isRegional === "boolean") {
+      const { error } = await client.from("app_users").update({ is_regional: isRegional }).eq("id", userId);
+      if (error) throw error;
+    }
+    if (Array.isArray(hotelIds)) {
+      await client.from("user_hotels").delete().eq("user_id", userId);
+      if (hotelIds.length) {
+        const { error } = await client.from("user_hotels").insert(hotelIds.map((h) => ({ user_id: userId, hotel_id: h })));
+        if (error) throw error;
+      }
+    }
+  }
+
   // ── Auth ────────────────────────────────────────────────────────────
 
   async function signIn(email, password) {
@@ -423,6 +525,8 @@
     loadFullState, saveDiff,
     uploadDocFile, uploadRequestFile, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
+    listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
+    listAllUsers, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
   };
 })();

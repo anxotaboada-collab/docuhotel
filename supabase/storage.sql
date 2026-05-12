@@ -18,7 +18,7 @@ values (
 --   docs/{hotel_id}/{doc_id}/{filename}
 --   requests/{request_id}/{item_id}/{upload_id}_{filename}
 
--- Authenticated users can READ files whose hotel they belong to.
+-- Authenticated users can READ files whose hotel they can access (incl. regional).
 drop policy if exists "storage_docs_read" on storage.objects;
 create policy "storage_docs_read" on storage.objects
   for select using (
@@ -26,26 +26,28 @@ create policy "storage_docs_read" on storage.objects
     and (
       -- documents path: docs/{hotel_id}/...
       (split_part(name, '/', 1) = 'docs'
-        and split_part(name, '/', 2)::uuid = current_hotel_id())
+        and (user_is_regional() or user_can_access(split_part(name, '/', 2)::uuid)))
       or
       -- request uploads: anyone in the hotel that owns the request
       (split_part(name, '/', 1) = 'requests'
         and exists (
           select 1 from requests r
           where r.id = split_part(name, '/', 2)
-            and r.hotel_id = current_hotel_id()
+            and (user_is_regional() or user_can_access(r.hotel_id))
         ))
     )
   );
 
--- Authenticated admin/dept_head can write to docs/ paths in their hotel.
+-- Authenticated admin/dept_head (or regional) can write to docs/ paths in their hotel.
 drop policy if exists "storage_docs_write" on storage.objects;
 create policy "storage_docs_write" on storage.objects
   for insert with check (
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'docs'
-    and split_part(name, '/', 2)::uuid = current_hotel_id()
-    and current_user_role() in ('admin','dept_head')
+    and (
+      user_is_regional()
+      or (user_can_access(split_part(name, '/', 2)::uuid) and current_user_role() in ('admin','dept_head'))
+    )
   );
 
 drop policy if exists "storage_docs_delete" on storage.objects;
@@ -53,8 +55,10 @@ create policy "storage_docs_delete" on storage.objects
   for delete using (
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'docs'
-    and split_part(name, '/', 2)::uuid = current_hotel_id()
-    and current_user_role() = 'admin'
+    and (
+      user_is_regional()
+      or (user_can_access(split_part(name, '/', 2)::uuid) and current_user_role() = 'admin')
+    )
   );
 
 -- Anonymous uploaders (public request links) can write to requests/{request_id}/...
