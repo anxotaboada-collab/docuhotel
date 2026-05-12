@@ -451,6 +451,15 @@
 
   // Hotels the current user can access (RLS: all of them for a regional admin,
   // else their primary hotel + any rows in user_hotels).
+  async function createHotel({ name, country, timezone } = {}) {
+    if (offline) throw new Error("No disponible en modo offline.");
+    const { data, error } = await client.rpc("create_hotel", {
+      p_name: name, p_country: country || "ES", p_timezone: timezone || "Europe/Madrid",
+    });
+    if (error) throw error;
+    return data; // uuid of the new hotel
+  }
+
   async function listAccessibleHotels() {
     if (offline) return [];
     const { data, error } = await client.from("hotels").select("*").order("name");
@@ -563,7 +572,7 @@
     uploadDocFile, uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
-    listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
+    createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
     listAllUsers, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
   };
