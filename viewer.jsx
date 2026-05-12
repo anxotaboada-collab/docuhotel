@@ -33,19 +33,68 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
 
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "long", day: "2-digit" }) : "—";
 
-  // Real uploaded PDF (backend mode): resolve a short-lived signed URL to embed.
+  // Real uploaded PDF (backend mode): resolve a short-lived signed URL and
+  // render it with pdf.js (works on iOS/Android/desktop). Falls back to a
+  // native <iframe> if pdf.js can't load or render.
   const hasRealFile = !!(doc.file?.key && window.DocuApi && !window.DocuApi.offline);
   const [pdfUrl, setPdfUrl] = React.useState(null);
   const [pdfErr, setPdfErr] = React.useState("");
+  const [pdfStatus, setPdfStatus] = React.useState("loading"); // loading | rendered | iframe | error
+  const pdfBoxRef = React.useRef(null);
+
   React.useEffect(() => {
-    if (!hasRealFile) { setPdfUrl(null); setPdfErr(""); return; }
+    if (!hasRealFile) return;
     let cancelled = false;
-    setPdfUrl(null); setPdfErr("");
+    setPdfUrl(null); setPdfErr(""); setPdfStatus("loading");
     window.DocuApi.signedUrl(doc.file.key, 1800)
-      .then(u => { if (cancelled) return; if (u) setPdfUrl(u); else setPdfErr("No se pudo obtener el archivo (¿se subió correctamente?)."); })
-      .catch(e => { if (!cancelled) setPdfErr(e?.message || "Error al cargar el PDF."); });
+      .then(u => {
+        if (cancelled) return;
+        if (u) setPdfUrl(u);
+        else { setPdfErr("No se pudo obtener el archivo (¿se subió y el documento está marcado como público?)."); setPdfStatus("error"); }
+      })
+      .catch(e => { if (!cancelled) { setPdfErr(e?.message || "Error al cargar el PDF."); setPdfStatus("error"); } });
     return () => { cancelled = true; };
   }, [hasRealFile, doc.file?.key]);
+
+  React.useEffect(() => {
+    if (!pdfUrl) return;
+    let cancelled = false;
+    const lib = window.pdfjsLib;
+    const box = pdfBoxRef.current;
+    if (!lib || !box) { setPdfStatus("iframe"); return; }
+    box.innerHTML = "";
+    setPdfStatus("loading");
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    lib.getDocument({ url: pdfUrl }).promise.then(async (pdf) => {
+      if (cancelled) return;
+      const cssW = (box.clientWidth || 700) - 4;
+      for (let n = 1; n <= pdf.numPages; n++) {
+        if (cancelled) return;
+        const page = await pdf.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.max(0.3, Math.min(2.5, cssW / base.width));
+        const vp = page.getViewport({ scale });
+        const canvas = document.createElement("canvas");
+        canvas.className = "pdf-page-canvas";
+        canvas.width = Math.floor(vp.width * dpr);
+        canvas.height = Math.floor(vp.height * dpr);
+        canvas.style.width = vp.width + "px";
+        canvas.style.height = vp.height + "px";
+        box.appendChild(canvas);
+        await page.render({
+          canvasContext: canvas.getContext("2d"),
+          viewport: vp,
+          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+        }).promise;
+      }
+      if (!cancelled) setPdfStatus(box.childElementCount ? "rendered" : "iframe");
+    }).catch((e) => {
+      if (cancelled) return;
+      console.error("pdf.js render failed, falling back to iframe:", e);
+      setPdfStatus("iframe");
+    });
+    return () => { cancelled = true; };
+  }, [pdfUrl]);
 
   // Build watermark line repeated diagonally
   const now = new Date();
@@ -92,18 +141,18 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
         <div className="viewer-pdf">
           {hasRealFile ? (
             <div className="viewer-pdf-frame">
-              {pdfUrl ? (
-                <iframe
-                  title={doc.file?.name || 'PDF'}
-                  src={pdfUrl + '#toolbar=1&navpanes=0'}
-                />
-              ) : pdfErr ? (
-                <div style={{ padding: 40, textAlign: 'center', color: '#fca5a5' }}>
-                  <div style={{ marginBottom: 10 }}>⚠ {pdfErr}</div>
-                  <div style={{ fontSize: 12, color: '#cbd5e1' }}>Archivo: {doc.file?.name || '—'}</div>
+              {pdfStatus === 'error' ? (
+                <div className="pdf-msg pdf-msg-err">
+                  <div>⚠ {pdfErr}</div>
+                  <div className="pdf-msg-sub">Archivo: {doc.file?.name || '—'}</div>
                 </div>
+              ) : pdfStatus === 'iframe' && pdfUrl ? (
+                <iframe className="pdf-iframe" title={doc.file?.name || 'PDF'} src={pdfUrl + '#toolbar=1&navpanes=0'} />
               ) : (
-                <div style={{ padding: 40, textAlign: 'center', color: '#cbd5e1' }}>Cargando PDF…</div>
+                <>
+                  <div ref={pdfBoxRef} className="pdf-canvas-box" />
+                  {pdfStatus === 'loading' && <div className="pdf-msg">Cargando PDF…</div>}
+                </>
               )}
               <div className="wm-overlay" style={{ pointerEvents: 'none' }}>
                 <div className="wm-diagonal">{wmLines}</div>

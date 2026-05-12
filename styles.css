@@ -661,16 +661,50 @@ button { font: inherit; color: inherit; }
   position: relative;
   width: 100%;
   align-self: stretch;
-  min-height: 600px;
-  background: #525659;
+  min-height: 70vh;
+  background: #4b4f52;
+  overflow: hidden;
 }
-.viewer-pdf-frame iframe {
+.pdf-canvas-box {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 6px 16px;
+  text-align: center;
+}
+.pdf-page-canvas {
   display: block;
+  margin: 0 auto 8px;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,.4);
+}
+.pdf-iframe {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  min-height: 600px;
   border: none;
 }
+.pdf-msg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: #d7dadd;
+  font-size: 14px;
+  pointer-events: none;
+}
+.pdf-msg-err { color: #fca5a5; pointer-events: auto; }
+.pdf-msg-sub { font-size: 12px; color: #aab2bb; }
 .viewer-page {
   background: white;
   width: 560px;
@@ -741,6 +775,25 @@ button { font: inherit; color: inherit; }
   text-align: center;
   line-height: 2;
   letter-spacing: 0.1em;
+}
+
+/* === Public (QR) view === */
+.public-doc-list { display: flex; flex-direction: column; gap: 10px; }
+.public-doc-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.public-doc-main { flex: 1; min-width: 0; }
+.public-doc-name { font-weight: 600; font-size: 14px; line-height: 1.3; word-break: break-word; }
+.public-doc-view { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .public-doc-card { flex-direction: column; align-items: stretch; }
+  .public-doc-view { width: 100%; justify-content: center; }
 }
 
 /* === Log === */
@@ -819,6 +872,6 @@ button { font: inherit; color: inherit; }
   .viewer-shell { grid-template-columns: 1fr; height: auto; }
   .viewer-side { border-left: none; border-top: 1px solid var(--line); }
   .viewer-pdf { padding: 0; }
-  .viewer-pdf-frame, .viewer-pdf-frame iframe { min-height: 78vh; }
+  .viewer-pdf-frame { min-height: 68vh; }
   .viewer-page { width: 100%; min-height: 0; padding: 28px 20px; }
 }
