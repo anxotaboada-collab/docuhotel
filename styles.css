@@ -124,6 +124,17 @@ button { font: inherit; color: inherit; }
   font-size: 13px;
   white-space: nowrap;
 }
+.hotel-switch {
+  margin-left: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 220px;
+}
 @media (max-width: 1100px) {
   .brand-tag { display: none; }
 }
