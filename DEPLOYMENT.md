@@ -95,6 +95,21 @@ window.DOCUHOTEL_CONFIG = {
 
 `config.js` is in `.gitignore` — it's not committed.
 
+### Build the app bundle
+
+The `.jsx` source files are compiled into `docuhotel.bundle.js` (no in-browser
+Babel anymore — that's why the app loads fast). Run this once, and again
+whenever you change a `.jsx` file:
+
+```bash
+npm install
+npm run build      # or: npm run dev   (rebuilds on change)
+```
+
+`docuhotel.bundle.js` is committed to the repo, and Vercel re-runs `npm run build`
+on every deploy (see `vercel.json` → `buildCommand`), so production is always
+built from the current source.
+
 ### Test locally
 
 Serve the folder with any static server:
