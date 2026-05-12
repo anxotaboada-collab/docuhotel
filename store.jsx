@@ -476,13 +476,31 @@ function daysUntil(iso) {
 // debounce-write changes back. The rest of the app keeps using setState +
 // saveState transparently.
 
-async function loadStateFromBackend(targetHotelId) {
+// Guard against overlapping loads: the boot effect and the auth-state listener
+// can both ask for the same data on startup. Without this they fire two full
+// waterfalls in parallel, which is a big chunk of the "20 seconds to load" pain.
+let _loadInFlight = null;
+let _loadInFlightKey = null;
+function loadStateFromBackend(targetHotelId) {
+  const key = targetHotelId || "__me__";
+  if (_loadInFlight && _loadInFlightKey === key) return _loadInFlight;
+  _loadInFlightKey = key;
+  _loadInFlight = _loadStateFromBackend(targetHotelId).finally(() => {
+    _loadInFlight = null;
+    _loadInFlightKey = null;
+  });
+  return _loadInFlight;
+}
+
+async function _loadStateFromBackend(targetHotelId) {
   if (!window.DocuApi || window.DocuApi.offline) return loadState();
   // Note: we intentionally do NOT swallow errors here — getMe()/loadFullState()
   // throw with a descriptive message that the boot screen surfaces to the user.
-  const me = await window.DocuApi.getMe();
+  const [me, accessible] = await Promise.all([
+    window.DocuApi.getMe(),
+    window.DocuApi.listAccessibleHotels(),
+  ]);
   if (!me) return null; // not authenticated → caller will show login
-  const accessible = await window.DocuApi.listAccessibleHotels();
   const wanted = targetHotelId && accessible.find((h) => h.id === targetHotelId) ? targetHotelId : me.hotel.id;
   const loadedHotel = accessible.find((h) => h.id === wanted) || {
     id: me.hotel.id, name: me.hotel.name, country: me.hotel.country, timezone: me.hotel.timezone, publicToken: me.hotel.public_token,
