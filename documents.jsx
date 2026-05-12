@@ -1,6 +1,7 @@
 // Docuhotel — Documents page (list + filters + form)
 
-function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
+function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can, viewerUser }) {
+  can = can || (() => true);
   const [filterStatus, setFilterStatus] = React.useState("all"); // all | active | draft | expiring | <statusId>
   const [search, setSearch] = React.useState("");
   const [filterCategory, setFilterCategory] = React.useState("");
@@ -17,9 +18,19 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
   const respById = Object.fromEntries(state.responsibles.map(r => [r.id, r]));
   const userById = Object.fromEntries(state.users.map(u => [u.id, u]));
 
+  // Department-scoped visibility (matches the server RLS): admins / "allDepts"
+  // see everything; everyone else only sees docs for "*" or one of their depts.
+  const myDepts = (viewerUser?.departments) || ["*"];
+  const seesAllDepts = can("allDepts") || myDepts.includes("*");
+  const visibleDocs = React.useMemo(() => (
+    seesAllDepts ? state.documents : state.documents.filter(d =>
+      !d.departments || d.departments.includes("*") || d.departments.some(dep => myDepts.includes(dep))
+    )
+  ), [state.documents, seesAllDepts, myDepts.join(",")]);
+
   const counts = React.useMemo(() => {
-    const c = { all: state.documents.length, active: 0, draft: 0, expiring: 0, public: 0 };
-    for (const d of state.documents) {
+    const c = { all: visibleDocs.length, active: 0, draft: 0, expiring: 0, public: 0 };
+    for (const d of visibleDocs) {
       const st = statusById[d.statusId];
       if (st?.key === "active") c.active++;
       if (st?.key === "draft") c.draft++;
@@ -28,9 +39,9 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
       if (d.publicAccess && st?.key === "active") c.public++;
     }
     return c;
-  }, [state.documents, state.statuses]);
+  }, [visibleDocs, state.statuses]);
 
-  const filtered = state.documents.filter(d => {
+  const filtered = visibleDocs.filter(d => {
     const st = statusById[d.statusId];
     if (filterStatus === "active" && st?.key !== "active") return false;
     if (filterStatus === "draft" && st?.key !== "draft") return false;
@@ -93,11 +104,13 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
       <div className="page-head">
         <div>
           <h1 className="page-title">{t.documents.title}</h1>
-          <div className="page-sub">{state.documents.length} · {t.common.total}</div>
+          <div className="page-sub">{visibleDocs.length} · {t.common.total}</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setEditing({ new: true })}>
-          <Icon.plus /> {t.documents.newDoc}
-        </button>
+        {can("create") && (
+          <button className="btn btn-primary" onClick={() => setEditing({ new: true })}>
+            <Icon.plus /> {t.documents.newDoc}
+          </button>
+        )}
       </div>
 
       {/* Quick filter pills */}
@@ -218,8 +231,8 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density }) {
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <button className="icon-btn" title={t.common.preview} onClick={() => openViewer(d)}><Icon.eye /></button>
-                    <button className="icon-btn" title={t.common.edit} onClick={() => setEditing(d)}><Icon.edit /></button>
-                    <button className="icon-btn" title={t.common.delete} onClick={() => handleDelete(d)}><Icon.trash /></button>
+                    {can("edit") && <button className="icon-btn" title={t.common.edit} onClick={() => setEditing(d)}><Icon.edit /></button>}
+                    {can("delete") && <button className="icon-btn" title={t.common.delete} onClick={() => handleDelete(d)}><Icon.trash /></button>}
                   </td>
                 </tr>
               );

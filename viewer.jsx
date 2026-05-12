@@ -59,35 +59,38 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
   React.useEffect(() => {
     if (!pdfUrl) return;
     let cancelled = false;
-    const lib = window.pdfjsLib;
     const box = pdfBoxRef.current;
-    if (!lib || !box) { setPdfStatus("iframe"); return; }
-    box.innerHTML = "";
+    if (!box || typeof window.ensurePdfJs !== "function") { setPdfStatus("iframe"); return; }
     setPdfStatus("loading");
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    lib.getDocument({ url: pdfUrl }).promise.then(async (pdf) => {
+    window.ensurePdfJs().then((lib) => {
       if (cancelled) return;
-      const cssW = (box.clientWidth || 700) - 4;
-      for (let n = 1; n <= pdf.numPages; n++) {
+      if (!lib) { setPdfStatus("iframe"); return; }
+      box.innerHTML = "";
+      return lib.getDocument({ url: pdfUrl }).promise.then(async (pdf) => {
         if (cancelled) return;
-        const page = await pdf.getPage(n);
-        const base = page.getViewport({ scale: 1 });
-        const scale = Math.max(0.3, Math.min(2.5, cssW / base.width));
-        const vp = page.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.className = "pdf-page-canvas";
-        canvas.width = Math.floor(vp.width * dpr);
-        canvas.height = Math.floor(vp.height * dpr);
-        canvas.style.width = vp.width + "px";
-        canvas.style.height = vp.height + "px";
-        box.appendChild(canvas);
-        await page.render({
-          canvasContext: canvas.getContext("2d"),
-          viewport: vp,
-          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
-        }).promise;
-      }
-      if (!cancelled) setPdfStatus(box.childElementCount ? "rendered" : "iframe");
+        const cssW = (box.clientWidth || 700) - 4;
+        for (let n = 1; n <= pdf.numPages; n++) {
+          if (cancelled) return;
+          const page = await pdf.getPage(n);
+          const base = page.getViewport({ scale: 1 });
+          const scale = Math.max(0.3, Math.min(2.5, cssW / base.width));
+          const vp = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          canvas.className = "pdf-page-canvas";
+          canvas.width = Math.floor(vp.width * dpr);
+          canvas.height = Math.floor(vp.height * dpr);
+          canvas.style.width = vp.width + "px";
+          canvas.style.height = vp.height + "px";
+          box.appendChild(canvas);
+          await page.render({
+            canvasContext: canvas.getContext("2d"),
+            viewport: vp,
+            transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+          }).promise;
+        }
+        if (!cancelled) setPdfStatus(box.childElementCount ? "rendered" : "iframe");
+      });
     }).catch((e) => {
       if (cancelled) return;
       console.error("pdf.js render failed, falling back to iframe:", e);

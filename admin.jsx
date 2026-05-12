@@ -1,6 +1,6 @@
 // Docuhotel — Admin panel (categories, departments, statuses, periods, owners, users, email)
 
-function AdminPage({ state, setState, t, lang, log }) {
+function AdminPage({ state, setState, t, lang, log, onImpersonate }) {
   const [section, setSection] = React.useState("categories");
   const sections = [
     ["categories",   t.admin.sections.categories],
@@ -39,7 +39,7 @@ function AdminPage({ state, setState, t, lang, log }) {
           {section === "statuses"     && <StatusesAdmin state={state} setState={setState} t={t} lang={lang} log={log} />}
           {section === "periods"      && <PeriodsAdmin state={state} setState={setState} t={t} lang={lang} log={log} />}
           {section === "responsibles" && <ResponsiblesAdmin state={state} setState={setState} t={t} log={log} />}
-          {section === "users"        && <UsersAdmin state={state} setState={setState} t={t} lang={lang} log={log} />}
+          {section === "users"        && <UsersAdmin state={state} setState={setState} t={t} lang={lang} log={log} onImpersonate={onImpersonate} />}
           {section === "templates"    && <TemplatesAdmin state={state} setState={setState} t={t} lang={lang} log={log} />}
           {section === "roles"        && <RolesAdmin state={state} setState={setState} t={t} log={log} />}
           {section === "publicAccess" && <PublicAccessAdmin state={state} setState={setState} t={t} log={log} />}
@@ -263,9 +263,10 @@ function ResponsiblesAdmin({ state, setState, t, log }) {
   );
 }
 
-function UsersAdmin({ state, setState, t, lang, log }) {
+function UsersAdmin({ state, setState, t, lang, log, onImpersonate }) {
   const [editing, setEditing] = React.useState(null);
   const items = state.users;
+  const myId = state.config?.currentUserId;
   const remove = (id) => {
     const it = items.find(i => i.id === id);
     setState(s => ({ ...s, users: s.users.filter(u => u.id !== id) }));
@@ -292,6 +293,9 @@ function UsersAdmin({ state, setState, t, lang, log }) {
               {u.departments.includes("*") ? t.documents.allDepartments :
                 u.departments.map(d => state.departments.find(x => x.id === d)?.name).filter(Boolean).join(", ")}
             </span>
+            {onImpersonate && u.id !== myId && (
+              <button className="icon-btn" title={t.admin?.viewAs || "Ver como este usuario"} onClick={() => onImpersonate(u.id)}><Icon.eye /></button>
+            )}
             <button className="icon-btn" onClick={() => setEditing(u)}><Icon.edit /></button>
             <button className="icon-btn" onClick={() => remove(u.id)}><Icon.trash /></button>
           </div>
