@@ -460,7 +460,7 @@ function RequestSubmitView({ request, state, setState, t, lang, setLang }) {
       try {
         const uploadId = window.DocuStore.uid("up");
         const up = await window.DocuApi.uploadRequestFile(request.id, itemId, uploadId, file);
-        const fileObj = { id: up.id, name: up.name, size: up.size, type: file.type, key: up.key, uploadedAt: new Date().toISOString(), dataUrl: null };
+        const fileObj = { id: up.id, name: up.name, size: up.size, type: file.type, key: up.key, uploadedAt: new Date().toISOString(), dataUrl: null, previewUrl: (typeof URL !== "undefined" && URL.createObjectURL) ? URL.createObjectURL(file) : null };
         const newItems = items.map(it => it.id === itemId ? { ...it, files: [...(it.files || []), fileObj] } : it);
         await window.DocuApi.requestLog(request.shareToken, "upload", `${itTitle}: ${file.name} (${(file.size/1024).toFixed(0)} KB)`);
         persistItems(newItems, { ts: new Date().toISOString(), action: "upload", details: `${itTitle}: ${file.name} (${(file.size/1024).toFixed(0)} KB)` });
@@ -619,8 +619,11 @@ function RequestItemUpload({ item, idx, t, lang, maxFileSizeMb, onFile, onRemove
 
       {(item.files || []).map((f, i) => (
         <div key={i} style={{ marginTop: 8, padding: '8px 12px', background: 'var(--ok-bg)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-          <span style={{ flex: 1 }}>📄 {f.name} <span style={{ color: 'var(--muted)' }}>· {(f.size/1024).toFixed(0)} KB · {fmt(f.uploadedAt)}</span></span>
-          <button className="icon-btn" onClick={() => onRemove(i)} title={t.common?.delete || "Eliminar"}>×</button>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📄 {f.name} <span style={{ color: 'var(--muted)' }}>· {((f.size||0)/1024).toFixed(0)} KB · {fmt(f.uploadedAt)}</span></span>
+          {(f.previewUrl || f.dataUrl) && (
+            <button type="button" className="icon-btn" onClick={() => window.open(f.previewUrl || f.dataUrl, "_blank", "noopener,noreferrer")} title={t.requests?.viewFile || t.common?.preview || "Ver"}>👁</button>
+          )}
+          <button type="button" className="icon-btn" onClick={() => onRemove(i)} title={t.common?.delete || "Eliminar"}>×</button>
         </div>
       ))}
     </div>
