@@ -103,8 +103,23 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
   const wmText = `${wmHeader} · ${user?.name || "—"} · ${stamp}`;
   const wmLines = Array.from({ length: 12 }, () => wmText).join("    ");
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     onDownloaded(doc);
+    // If a real PDF was uploaded, download that file instead of the placeholder.
+    if (doc.file?.key && window.DocuApi && !window.DocuApi.offline) {
+      try {
+        const url = await window.DocuApi.signedUrl(doc.file.key);
+        if (url) {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = doc.file.name || (doc.title + ".pdf");
+          document.body.appendChild(a); a.click(); a.remove();
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to download original PDF, falling back to placeholder:", e);
+      }
+    }
     // generate a watermarked HTML "PDF-like" file (real apps would re-render the PDF)
     const html = buildWatermarkedHtml(doc, state, t, lang, auditMode);
     const blob = new Blob([html], { type: "text/html" });
