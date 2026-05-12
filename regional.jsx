@@ -12,18 +12,68 @@ function RegionalPanel({ state, t, lang, switchHotel, pushToast }) {
       <div className="page-head">
         <div>
           <h1 className="page-title">🌐 Regional</h1>
-          <div className="page-sub">Gestión corporativa: documentos para varios hoteles, registro y usuarios.</div>
+          <div className="page-sub">Gestión corporativa: hoteles, documentos para varios hoteles, registro y usuarios.</div>
         </div>
       </div>
       <div className="admin-nav" style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+        <button className={`btn btn-sm ${section === "newhotel" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("newhotel")}>🏨 Nuevo hotel</button>
         <button className={`btn btn-sm ${section === "upload" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("upload")}>Subir documento regional</button>
         <button className={`btn btn-sm ${section === "registry" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("registry")}>Registro de subidas</button>
         <button className={`btn btn-sm ${section === "users" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("users")}>Usuarios y hoteles</button>
       </div>
+      {section === "newhotel" && <RegionalNewHotel switchHotel={switchHotel} pushToast={pushToast} />}
       {section === "upload" && <RegionalUpload state={state} hotels={hotels} pushToast={pushToast} onDone={() => setSection("registry")} />}
       {section === "registry" && <RegionalRegistry hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} />}
       {section === "users" && <RegionalUsers hotels={hotels} hotelName={hotelName} pushToast={pushToast} />}
     </div>
+  );
+}
+
+// ── Create a brand-new hotel (with default taxonomies) ────────────────
+function RegionalNewHotel({ switchHotel, pushToast }) {
+  const [name, setName] = React.useState("");
+  const [country, setCountry] = React.useState("ES");
+  const [timezone, setTimezone] = React.useState("Europe/Madrid");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!name.trim()) { setError("Pon un nombre para el hotel."); return; }
+    setBusy(true);
+    try {
+      const id = await window.DocuApi.createHotel({ name: name.trim(), country: country.trim() || "ES", timezone: timezone.trim() || "Europe/Madrid" });
+      pushToast && pushToast(`✓ Hotel "${name.trim()}" creado`);
+      setName("");
+      if (id && switchHotel) await switchHotel(id);
+    } catch (err) {
+      setError("No se pudo crear el hotel: " + (err?.message || err));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ maxWidth: 480, display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
+        Crea un hotel nuevo con las categorías, departamentos, estados y periodos por defecto. Al crearlo entrarás en él automáticamente; luego podrás editarlo y añadir usuarios desde el panel de administración.
+      </p>
+      <label style={{ display: "grid", gap: 4 }}>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>Nombre del hotel *</span>
+        <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Hotel Atlántico Norte" />
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>País</span>
+          <input className="input" value={country} onChange={e => setCountry(e.target.value)} placeholder="ES" />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Zona horaria</span>
+          <input className="input" value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="Europe/Madrid" />
+        </label>
+      </div>
+      {error && <div style={{ color: "var(--danger, #b91c1c)", background: "var(--danger-bg, #fee2e2)", padding: 8, borderRadius: 6, fontSize: 13 }}>{error}</div>}
+      <div><button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Creando…" : "Crear hotel"}</button></div>
+    </form>
   );
 }
 

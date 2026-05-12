@@ -473,6 +473,7 @@ drop function if exists request_log_append(text, text, text);
 drop function if exists request_upload_delete(text, text);
 drop function if exists request_save_progress(text);
 drop function if exists request_submit(text);
+drop function if exists create_hotel(text, text, text);
 
 -- Documents marked as public_access can be read by anyone who knows hotel.public_token.
 -- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
@@ -612,6 +613,71 @@ begin
 end;
 $fn$;
 grant execute on function request_submit(text) to anon, authenticated;
+
+-- Master / regional: create a brand-new hotel (with the default taxonomies),
+-- without touching the SQL editor. SECURITY DEFINER → bypasses RLS, but checks
+-- user_is_regional() first. Returns the new hotel id.
+create function create_hotel(p_name text, p_country text default 'ES', p_timezone text default 'Europe/Madrid')
+returns uuid
+language plpgsql security definer set search_path = public
+as $fn$
+declare
+  v_hotel_id uuid;
+  v_pfx text;
+begin
+  if not user_is_regional() then
+    raise exception 'only regional admins can create hotels';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'hotel name required';
+  end if;
+  insert into hotels(name, country, timezone)
+    values (btrim(p_name), coalesce(nullif(btrim(p_country), ''), 'ES'), coalesce(nullif(btrim(p_timezone), ''), 'Europe/Madrid'))
+    returning id into v_hotel_id;
+  v_pfx := replace(v_hotel_id::text, '-', '');
+
+  insert into statuses(id, hotel_id, key, color, bg, label, sort) values
+    ('st_active_'||v_pfx,   v_hotel_id, 'active',   '#14532d', '#dcfce7', '{"es":"En vigor","en":"Active","de":"Gültig"}', 0),
+    ('st_draft_'||v_pfx,    v_hotel_id, 'draft',    '#404040', '#e5e5e3', '{"es":"Borrador","en":"Draft","de":"Entwurf"}', 1),
+    ('st_pending_'||v_pfx,  v_hotel_id, 'pending',  '#1e3a8a', '#dbeafe', '{"es":"Pendiente de aprobar","en":"Pending approval","de":"Genehmigung ausstehend"}', 2),
+    ('st_archived_'||v_pfx, v_hotel_id, 'archived', '#6b6b6b', '#efefee', '{"es":"Descatalogado","en":"Archived","de":"Archiviert"}', 3);
+
+  insert into categories(id, hotel_id, name, sort) values
+    ('cat_oca_'||v_pfx,       v_hotel_id, 'OCA', 0),
+    ('cat_travelife_'||v_pfx, v_hotel_id, 'Travelife', 1),
+    ('cat_prl_'||v_pfx,       v_hotel_id, 'Prevención de riesgos', 2);
+
+  insert into departments(id, hotel_id, name, sort) values
+    ('dep_housekeeping_'||v_pfx, v_hotel_id, 'Housekeeping', 0),
+    ('dep_fb_'||v_pfx,           v_hotel_id, 'F&B', 1),
+    ('dep_kitchen_'||v_pfx,      v_hotel_id, 'Cocina', 2),
+    ('dep_maint_'||v_pfx,        v_hotel_id, 'Mantenimiento', 3),
+    ('dep_direction_'||v_pfx,    v_hotel_id, 'Dirección', 4),
+    ('dep_hr_'||v_pfx,           v_hotel_id, 'RRHH', 5);
+
+  insert into periods(id, hotel_id, months, manual, label, sort) values
+    ('p_manual_'||v_pfx, v_hotel_id, 0,   true,  '{"es":"Manual","en":"Manual","de":"Manuell"}', 0),
+    ('p_1m_'||v_pfx,     v_hotel_id, 1,   false, '{"es":"1 mes","en":"1 month","de":"1 Monat"}', 1),
+    ('p_3m_'||v_pfx,     v_hotel_id, 3,   false, '{"es":"3 meses","en":"3 months","de":"3 Monate"}', 2),
+    ('p_6m_'||v_pfx,     v_hotel_id, 6,   false, '{"es":"6 meses","en":"6 months","de":"6 Monate"}', 3),
+    ('p_12m_'||v_pfx,    v_hotel_id, 12,  false, '{"es":"1 año","en":"1 year","de":"1 Jahr"}', 4),
+    ('p_24m_'||v_pfx,    v_hotel_id, 24,  false, '{"es":"2 años","en":"2 years","de":"2 Jahre"}', 5),
+    ('p_36m_'||v_pfx,    v_hotel_id, 36,  false, '{"es":"3 años","en":"3 years","de":"3 Jahre"}', 6),
+    ('p_60m_'||v_pfx,    v_hotel_id, 60,  false, '{"es":"5 años","en":"5 years","de":"5 Jahre"}', 7);
+
+  insert into responsibles(id, hotel_id, name, email) values
+    ('r_dir_'||v_pfx,  v_hotel_id, 'Dirección General',     'direccion@hotel.com'),
+    ('r_jefe_'||v_pfx, v_hotel_id, 'Jefa de Recepción',     'recepcion@hotel.com'),
+    ('r_gov_'||v_pfx,  v_hotel_id, 'Gobernanta',            'gobernanta@hotel.com'),
+    ('r_chef_'||v_pfx, v_hotel_id, 'Chef Ejecutivo',        'chef@hotel.com'),
+    ('r_main_'||v_pfx, v_hotel_id, 'Jefe de Mantenimiento', 'mantenimiento@hotel.com');
+
+  insert into hotel_config(hotel_id, data) values (v_hotel_id, '{}'::jsonb) on conflict (hotel_id) do nothing;
+  return v_hotel_id;
+end;
+$fn$;
+revoke execute on function create_hotel(text, text, text) from anon;
+grant execute on function create_hotel(text, text, text) to authenticated;
 
 -- ───────────────────────────────────────────────────────────────────
 -- Activity & email logs
