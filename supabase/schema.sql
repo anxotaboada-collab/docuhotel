@@ -483,3 +483,82 @@ create policy email_log_select on email_log
 drop policy if exists email_log_insert on email_log;
 create policy email_log_insert on email_log
   for insert with check (hotel_id = current_hotel_id());
+
+-- ───────────────────────────────────────────────────────────────────
+-- Multi-hotel / regional access — PHASE 1 (additive only; no policy
+-- changes here, so this section can't break existing single-hotel use).
+-- ───────────────────────────────────────────────────────────────────
+
+-- "Regional admin": can access every hotel in the system.
+alter table app_users add column if not exists is_regional boolean not null default false;
+
+-- Extra hotels a (non-regional) user may access, beyond app_users.hotel_id.
+create table if not exists user_hotels (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  hotel_id   uuid not null references hotels(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, hotel_id)
+);
+create index if not exists idx_user_hotels_user on user_hotels(user_id);
+alter table user_hotels enable row level security;
+
+-- A regional/corporate document is a *single* documents row that is also
+-- visible in the hotels listed here (no duplication). Empty for hotel-local docs.
+create table if not exists document_hotels (
+  document_id text not null references documents(id) on delete cascade,
+  hotel_id    uuid not null references hotels(id) on delete cascade,
+  primary key (document_id, hotel_id)
+);
+create index if not exists idx_document_hotels_hotel on document_hotels(hotel_id);
+alter table document_hotels enable row level security;
+
+-- Registry: each regional upload — what document, who, when, which hotels.
+create table if not exists regional_uploads (
+  id          uuid primary key default gen_random_uuid(),
+  document_id text references documents(id) on delete set null,
+  uploaded_by uuid references auth.users(id) on delete set null,
+  title       text,
+  hotel_ids   uuid[] not null default '{}',
+  created_at  timestamptz not null default now()
+);
+alter table regional_uploads enable row level security;
+
+-- Helpers (SECURITY DEFINER so they aren't blocked by the tables' own RLS).
+create or replace function user_is_regional() returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select coalesce((select is_regional from app_users where id = auth.uid()), false);
+$fn$;
+
+-- Every hotel id the current user may access (regional → all hotels).
+create or replace function user_hotel_ids() returns uuid[]
+language sql stable security definer set search_path = public as $fn$
+  select case
+    when user_is_regional() then array(select id from hotels)
+    else array(
+      select hotel_id from app_users where id = auth.uid()
+      union
+      select hotel_id from user_hotels where user_id = auth.uid()
+    )
+  end;
+$fn$;
+
+create or replace function user_can_access(p_hotel_id uuid) returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select p_hotel_id = any(user_hotel_ids());
+$fn$;
+
+-- RLS for the new tables only (does not touch existing tables).
+drop policy if exists user_hotels_select on user_hotels;
+create policy user_hotels_select on user_hotels for select using (user_id = auth.uid() or user_is_regional());
+drop policy if exists user_hotels_regional_write on user_hotels;
+create policy user_hotels_regional_write on user_hotels for all using (user_is_regional()) with check (user_is_regional());
+
+drop policy if exists document_hotels_select on document_hotels;
+create policy document_hotels_select on document_hotels for select using (user_can_access(hotel_id));
+drop policy if exists document_hotels_regional_write on document_hotels;
+create policy document_hotels_regional_write on document_hotels for all using (user_is_regional()) with check (user_is_regional());
+
+drop policy if exists regional_uploads_select on regional_uploads;
+create policy regional_uploads_select on regional_uploads for select using (user_is_regional());
+drop policy if exists regional_uploads_regional_write on regional_uploads;
+create policy regional_uploads_regional_write on regional_uploads for all using (user_is_regional()) with check (user_is_regional());
