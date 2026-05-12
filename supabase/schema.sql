@@ -303,6 +303,70 @@ alter table email_log       enable row level security;
 alter table email_templates enable row level security;
 alter table hotel_config    enable row level security;
 
+-- ───────────────────────────────────────────────────────────────────
+-- Multi-hotel / regional access — tables & helper functions.
+-- These MUST come before the RLS policies below, because those policies
+-- reference user_can_access()/user_is_regional() and the document_hotels table.
+-- (Everything here is additive and idempotent: re-running this file is safe.)
+-- ───────────────────────────────────────────────────────────────────
+
+-- "Regional admin": can access every hotel in the system.
+alter table app_users add column if not exists is_regional boolean not null default false;
+
+-- Extra hotels a (non-regional) user may access, beyond app_users.hotel_id.
+create table if not exists user_hotels (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  hotel_id   uuid not null references hotels(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, hotel_id)
+);
+create index if not exists idx_user_hotels_user on user_hotels(user_id);
+alter table user_hotels enable row level security;
+
+-- A regional/corporate document is a *single* documents row that is also
+-- visible in the hotels listed here (no duplication). Empty for hotel-local docs.
+create table if not exists document_hotels (
+  document_id text not null references documents(id) on delete cascade,
+  hotel_id    uuid not null references hotels(id) on delete cascade,
+  primary key (document_id, hotel_id)
+);
+create index if not exists idx_document_hotels_hotel on document_hotels(hotel_id);
+alter table document_hotels enable row level security;
+
+-- Helpers (SECURITY DEFINER so they aren't blocked by the tables' own RLS).
+create or replace function user_is_regional() returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select coalesce((select is_regional from app_users where id = auth.uid()), false);
+$fn$;
+
+-- Every hotel id the current user may access (regional → all hotels).
+create or replace function user_hotel_ids() returns uuid[]
+language sql stable security definer set search_path = public as $fn$
+  select case
+    when user_is_regional() then array(select id from hotels)
+    else array(
+      select hotel_id from app_users where id = auth.uid()
+      union
+      select hotel_id from user_hotels where user_id = auth.uid()
+    )
+  end;
+$fn$;
+
+create or replace function user_can_access(p_hotel_id uuid) returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select p_hotel_id = any(user_hotel_ids());
+$fn$;
+
+drop policy if exists user_hotels_select on user_hotels;
+create policy user_hotels_select on user_hotels for select using (user_id = auth.uid() or user_is_regional());
+drop policy if exists user_hotels_regional_write on user_hotels;
+create policy user_hotels_regional_write on user_hotels for all using (user_is_regional()) with check (user_is_regional());
+
+drop policy if exists document_hotels_select on document_hotels;
+create policy document_hotels_select on document_hotels for select using (user_can_access(hotel_id));
+drop policy if exists document_hotels_regional_write on document_hotels;
+create policy document_hotels_regional_write on document_hotels for all using (user_is_regional()) with check (user_is_regional());
+
 -- Hotels: a user can read any hotel it can access; admins (or regional) can update.
 drop policy if exists hotels_select on hotels;
 create policy hotels_select on hotels for select using (user_can_access(id));
@@ -406,6 +470,10 @@ drop function if exists public_documents(text);
 drop function if exists audit_project(text);
 drop function if exists request_by_token(text);
 drop function if exists request_log_append(text, text, text);
+drop function if exists request_upload_delete(text, text);
+drop function if exists request_save_progress(text);
+drop function if exists request_submit(text);
+drop function if exists create_hotel(text, text, text);
 
 -- Documents marked as public_access can be read by anyone who knows hotel.public_token.
 -- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
@@ -480,6 +548,137 @@ end;
 $fn$;
 grant execute on function request_log_append(text, text, text) to anon, authenticated;
 
+-- Soft-delete an upload, by the anonymous uploader, while the request is still
+-- open (i.e. not submitted/expired). Sets request_uploads.deleted_at so
+-- request_by_token (and the admin's load) stop counting it.
+create function request_upload_delete(p_token text, p_upload_id text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+declare
+  v_request_id text;
+begin
+  select r.id into v_request_id
+    from requests r
+   where r.share_token = p_token
+     and r.status in ('open','saved')
+     and r.expires_at > now()
+     and r.submitted_at is null;
+  if v_request_id is null then
+    raise exception 'invalid token or request closed';
+  end if;
+  update request_uploads u
+     set deleted_at = now()
+    from request_items i
+   where u.id = p_upload_id
+     and i.id = u.request_item_id
+     and i.request_id = v_request_id
+     and u.deleted_at is null;
+end;
+$fn$;
+grant execute on function request_upload_delete(text, text) to anon, authenticated;
+
+-- Mark the request as "in progress" (draft saved by the uploader).
+create function request_save_progress(p_token text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+begin
+  update requests
+     set saved_at = now(),
+         status = case when status = 'open' then 'saved' else status end,
+         updated_at = now()
+   where share_token = p_token
+     and submitted_at is null
+     and expires_at > now();
+  if not found then raise exception 'invalid token or request closed'; end if;
+end;
+$fn$;
+grant execute on function request_save_progress(text) to anon, authenticated;
+
+-- Final submit by the uploader: locks the request (no more uploads).
+create function request_submit(p_token text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+begin
+  update requests
+     set submitted_at = now(),
+         status = 'submitted',
+         updated_at = now()
+   where share_token = p_token
+     and submitted_at is null
+     and expires_at > now();
+  if not found then raise exception 'invalid token or request closed'; end if;
+end;
+$fn$;
+grant execute on function request_submit(text) to anon, authenticated;
+
+-- Master / regional: create a brand-new hotel (with the default taxonomies),
+-- without touching the SQL editor. SECURITY DEFINER → bypasses RLS, but checks
+-- user_is_regional() first. Returns the new hotel id.
+create function create_hotel(p_name text, p_country text default 'ES', p_timezone text default 'Europe/Madrid')
+returns uuid
+language plpgsql security definer set search_path = public
+as $fn$
+declare
+  v_hotel_id uuid;
+  v_pfx text;
+begin
+  if not user_is_regional() then
+    raise exception 'only regional admins can create hotels';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'hotel name required';
+  end if;
+  insert into hotels(name, country, timezone)
+    values (btrim(p_name), coalesce(nullif(btrim(p_country), ''), 'ES'), coalesce(nullif(btrim(p_timezone), ''), 'Europe/Madrid'))
+    returning id into v_hotel_id;
+  v_pfx := replace(v_hotel_id::text, '-', '');
+
+  insert into statuses(id, hotel_id, key, color, bg, label, sort) values
+    ('st_active_'||v_pfx,   v_hotel_id, 'active',   '#14532d', '#dcfce7', '{"es":"En vigor","en":"Active","de":"Gültig"}', 0),
+    ('st_draft_'||v_pfx,    v_hotel_id, 'draft',    '#404040', '#e5e5e3', '{"es":"Borrador","en":"Draft","de":"Entwurf"}', 1),
+    ('st_pending_'||v_pfx,  v_hotel_id, 'pending',  '#1e3a8a', '#dbeafe', '{"es":"Pendiente de aprobar","en":"Pending approval","de":"Genehmigung ausstehend"}', 2),
+    ('st_archived_'||v_pfx, v_hotel_id, 'archived', '#6b6b6b', '#efefee', '{"es":"Descatalogado","en":"Archived","de":"Archiviert"}', 3);
+
+  insert into categories(id, hotel_id, name, sort) values
+    ('cat_oca_'||v_pfx,       v_hotel_id, 'OCA', 0),
+    ('cat_travelife_'||v_pfx, v_hotel_id, 'Travelife', 1),
+    ('cat_prl_'||v_pfx,       v_hotel_id, 'Prevención de riesgos', 2);
+
+  insert into departments(id, hotel_id, name, sort) values
+    ('dep_housekeeping_'||v_pfx, v_hotel_id, 'Housekeeping', 0),
+    ('dep_fb_'||v_pfx,           v_hotel_id, 'F&B', 1),
+    ('dep_kitchen_'||v_pfx,      v_hotel_id, 'Cocina', 2),
+    ('dep_maint_'||v_pfx,        v_hotel_id, 'Mantenimiento', 3),
+    ('dep_direction_'||v_pfx,    v_hotel_id, 'Dirección', 4),
+    ('dep_hr_'||v_pfx,           v_hotel_id, 'RRHH', 5);
+
+  insert into periods(id, hotel_id, months, manual, label, sort) values
+    ('p_manual_'||v_pfx, v_hotel_id, 0,   true,  '{"es":"Manual","en":"Manual","de":"Manuell"}', 0),
+    ('p_1m_'||v_pfx,     v_hotel_id, 1,   false, '{"es":"1 mes","en":"1 month","de":"1 Monat"}', 1),
+    ('p_3m_'||v_pfx,     v_hotel_id, 3,   false, '{"es":"3 meses","en":"3 months","de":"3 Monate"}', 2),
+    ('p_6m_'||v_pfx,     v_hotel_id, 6,   false, '{"es":"6 meses","en":"6 months","de":"6 Monate"}', 3),
+    ('p_12m_'||v_pfx,    v_hotel_id, 12,  false, '{"es":"1 año","en":"1 year","de":"1 Jahr"}', 4),
+    ('p_24m_'||v_pfx,    v_hotel_id, 24,  false, '{"es":"2 años","en":"2 years","de":"2 Jahre"}', 5),
+    ('p_36m_'||v_pfx,    v_hotel_id, 36,  false, '{"es":"3 años","en":"3 years","de":"3 Jahre"}', 6),
+    ('p_60m_'||v_pfx,    v_hotel_id, 60,  false, '{"es":"5 años","en":"5 years","de":"5 Jahre"}', 7);
+
+  insert into responsibles(id, hotel_id, name, email) values
+    ('r_dir_'||v_pfx,  v_hotel_id, 'Dirección General',     'direccion@hotel.com'),
+    ('r_jefe_'||v_pfx, v_hotel_id, 'Jefa de Recepción',     'recepcion@hotel.com'),
+    ('r_gov_'||v_pfx,  v_hotel_id, 'Gobernanta',            'gobernanta@hotel.com'),
+    ('r_chef_'||v_pfx, v_hotel_id, 'Chef Ejecutivo',        'chef@hotel.com'),
+    ('r_main_'||v_pfx, v_hotel_id, 'Jefe de Mantenimiento', 'mantenimiento@hotel.com');
+
+  insert into hotel_config(hotel_id, data) values (v_hotel_id, '{}'::jsonb) on conflict (hotel_id) do nothing;
+  return v_hotel_id;
+end;
+$fn$;
+revoke execute on function create_hotel(text, text, text) from anon;
+grant execute on function create_hotel(text, text, text) to authenticated;
+
 -- ───────────────────────────────────────────────────────────────────
 -- Activity & email logs
 -- ───────────────────────────────────────────────────────────────────
@@ -501,32 +700,11 @@ create policy email_log_insert on email_log
   for insert with check (user_can_access(hotel_id) or user_is_regional());
 
 -- ───────────────────────────────────────────────────────────────────
--- Multi-hotel / regional access — PHASE 1 (additive only; no policy
--- changes here, so this section can't break existing single-hotel use).
+-- Multi-hotel / regional access — registry of regional uploads.
+-- (user_hotels / document_hotels and the helper functions are defined
+-- earlier, right after the RLS-enable block, because the policies above
+-- depend on them.)
 -- ───────────────────────────────────────────────────────────────────
-
--- "Regional admin": can access every hotel in the system.
-alter table app_users add column if not exists is_regional boolean not null default false;
-
--- Extra hotels a (non-regional) user may access, beyond app_users.hotel_id.
-create table if not exists user_hotels (
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  hotel_id   uuid not null references hotels(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  primary key (user_id, hotel_id)
-);
-create index if not exists idx_user_hotels_user on user_hotels(user_id);
-alter table user_hotels enable row level security;
-
--- A regional/corporate document is a *single* documents row that is also
--- visible in the hotels listed here (no duplication). Empty for hotel-local docs.
-create table if not exists document_hotels (
-  document_id text not null references documents(id) on delete cascade,
-  hotel_id    uuid not null references hotels(id) on delete cascade,
-  primary key (document_id, hotel_id)
-);
-create index if not exists idx_document_hotels_hotel on document_hotels(hotel_id);
-alter table document_hotels enable row level security;
 
 -- Registry: each regional upload — what document, who, when, which hotels.
 create table if not exists regional_uploads (
@@ -538,41 +716,6 @@ create table if not exists regional_uploads (
   created_at  timestamptz not null default now()
 );
 alter table regional_uploads enable row level security;
-
--- Helpers (SECURITY DEFINER so they aren't blocked by the tables' own RLS).
-create or replace function user_is_regional() returns boolean
-language sql stable security definer set search_path = public as $fn$
-  select coalesce((select is_regional from app_users where id = auth.uid()), false);
-$fn$;
-
--- Every hotel id the current user may access (regional → all hotels).
-create or replace function user_hotel_ids() returns uuid[]
-language sql stable security definer set search_path = public as $fn$
-  select case
-    when user_is_regional() then array(select id from hotels)
-    else array(
-      select hotel_id from app_users where id = auth.uid()
-      union
-      select hotel_id from user_hotels where user_id = auth.uid()
-    )
-  end;
-$fn$;
-
-create or replace function user_can_access(p_hotel_id uuid) returns boolean
-language sql stable security definer set search_path = public as $fn$
-  select p_hotel_id = any(user_hotel_ids());
-$fn$;
-
--- RLS for the new tables only (does not touch existing tables).
-drop policy if exists user_hotels_select on user_hotels;
-create policy user_hotels_select on user_hotels for select using (user_id = auth.uid() or user_is_regional());
-drop policy if exists user_hotels_regional_write on user_hotels;
-create policy user_hotels_regional_write on user_hotels for all using (user_is_regional()) with check (user_is_regional());
-
-drop policy if exists document_hotels_select on document_hotels;
-create policy document_hotels_select on document_hotels for select using (user_can_access(hotel_id));
-drop policy if exists document_hotels_regional_write on document_hotels;
-create policy document_hotels_regional_write on document_hotels for all using (user_is_regional()) with check (user_is_regional());
 
 drop policy if exists regional_uploads_select on regional_uploads;
 create policy regional_uploads_select on regional_uploads for select using (user_is_regional());

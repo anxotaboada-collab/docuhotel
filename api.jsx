@@ -152,9 +152,13 @@
       "categories","departments","statuses","periods","responsibles",
       "app_users","documents","projects","email_templates","activity_log","email_log","hotel_config"
     ];
-    const promises = tables.map((t) =>
-      client.from(t).select("*").eq("hotel_id", hotelId)
-    );
+    // activity_log / email_log grow without bound; only the most recent matter.
+    const RECENT_LIMIT = 500;
+    const promises = tables.map((t) => {
+      const q = client.from(t).select("*").eq("hotel_id", hotelId);
+      if (t === "activity_log" || t === "email_log") return q.order("ts", { ascending: false }).limit(RECENT_LIMIT);
+      return q;
+    });
     // hotel_config is keyed by hotel_id (PK), still filtered by hotel_id
     const results = await Promise.all(promises);
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
@@ -210,7 +214,7 @@
       responsibles:byTable.responsibles.map((r) => ({ id: r.id, name: r.name, email: r.email })),
       users:       byTable.app_users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, departments: u.departments || [] })),
       documents:   docRows.map((d) => ({ ...docFromRow(d), sharedHotelIds: sharedByDoc[d.id] || [] })),
-      projects:    [], // filled below
+      projects:    byTable.projects.map(projFromRow),
       requests,
       log:         byTable.activity_log
                      .sort((a, b) => new Date(b.ts) - new Date(a.ts))
@@ -229,7 +233,6 @@
           name: t.name, subject: t.subject, body: t.body,
         })),
       },
-      _projects_raw: byTable, // not used; safe to ignore
     };
   }
 
@@ -317,12 +320,16 @@
       if (!prev || JSON.stringify(prev) !== JSON.stringify(r)) {
         const { error } = await client.from("requests").upsert(reqToRow(r, hotelId), { onConflict: "id" });
         if (error) { console.error("[requests] upsert", error); continue; }
-        // Items: replace all (simpler than diff)
-        await client.from("request_items").delete().eq("request_id", id);
+        // Items: upsert the current ones and delete only the removed ones, so
+        // request_uploads rows (FK on delete cascade) survive an edit.
+        const keepIds = (r.items || []).map((it) => it.id);
+        const { data: existingItems } = await client.from("request_items").select("id").eq("request_id", id);
+        const removedIds = (existingItems || []).map((x) => x.id).filter((x) => !keepIds.includes(x));
+        if (removedIds.length) await client.from("request_items").delete().in("id", removedIds);
         if (r.items?.length) {
-          await client.from("request_items").insert(r.items.map((it, i) => ({
+          await client.from("request_items").upsert(r.items.map((it, i) => ({
             id: it.id, request_id: id, title: it.title, comments: it.comments || "", required: !!it.required, sort: i,
-          })));
+          })), { onConflict: "id" });
         }
       }
       // Append new log entries
@@ -422,10 +429,37 @@
     await client.rpc("request_log_append", { p_token: token, p_action: action, p_details: details || "" });
   }
 
+  async function requestDeleteUpload(token, uploadId) {
+    if (offline) return;
+    const { error } = await client.rpc("request_upload_delete", { p_token: token, p_upload_id: uploadId });
+    if (error) throw error;
+  }
+
+  async function requestSaveProgress(token) {
+    if (offline) return;
+    const { error } = await client.rpc("request_save_progress", { p_token: token });
+    if (error) throw error;
+  }
+
+  async function requestSubmit(token) {
+    if (offline) return;
+    const { error } = await client.rpc("request_submit", { p_token: token });
+    if (error) throw error;
+  }
+
   // ── Regional / multi-hotel ──────────────────────────────────────────
 
   // Hotels the current user can access (RLS: all of them for a regional admin,
   // else their primary hotel + any rows in user_hotels).
+  async function createHotel({ name, country, timezone } = {}) {
+    if (offline) throw new Error("No disponible en modo offline.");
+    const { data, error } = await client.rpc("create_hotel", {
+      p_name: name, p_country: country || "ES", p_timezone: timezone || "Europe/Madrid",
+    });
+    if (error) throw error;
+    return data; // uuid of the new hotel
+  }
+
   async function listAccessibleHotels() {
     if (offline) return [];
     const { data, error } = await client.from("hotels").select("*").order("name");
@@ -537,7 +571,8 @@
     loadFullState, saveDiff,
     uploadDocFile, uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
-    listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
+    requestDeleteUpload, requestSaveProgress, requestSubmit,
+    createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
     listAllUsers, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
   };

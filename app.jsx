@@ -23,6 +23,7 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [tweaks, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [impersonateId, setImpersonateId] = useState(null); // master "view as" — UI only
 
   useEffect(() => {
     const onHash = () => setRouteState(window.location.hash || "");
@@ -191,7 +192,21 @@ function App() {
     setTimeout(() => setToasts(arr => arr.filter(x => x.id !== id)), 2400);
   };
 
-  const currentUser = state.users.find(u => u.id === state.config.currentUserId);
+  const realUser = state.users.find(u => u.id === state.config.currentUserId);
+  const impUser = impersonateId ? state.users.find(u => u.id === impersonateId) : null;
+  const isImpersonating = !!impUser;
+  const currentUser = impUser || realUser;
+  const currentRole = currentUser?.role || "employee";
+  const perms = (state.config?.permissions && state.config.permissions[currentRole]) || {};
+  const can = (p) => !!perms[p];
+  const canAdmin = can("adminPanel") || (!!state.config?.isRegional && !isImpersonating);
+  const canViewLog = can("viewLog") || canAdmin;
+  const canRegional = !!state.config?.isRegional && !isImpersonating;
+  const visibleTabs = ["documents", "projects", "requests"]
+    .concat(canViewLog ? ["log"] : [])
+    .concat(canAdmin ? ["admin"] : [])
+    .concat(canRegional ? ["regional"] : []);
+  const effectiveTab = visibleTabs.includes(tab) ? tab : "documents";
 
   // Public route: #/public/<token>
   const publicMatch = route.match(/^#\/public\/(.+)$/);
@@ -272,13 +287,13 @@ function App() {
           <span className="brand-tag current-hotel-name">— {state.config?.hotel?.name || t.appTagline}</span>
         )}
         <nav className="tabs">
-          <button className={`tab ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>{t.nav.documents}</button>
-          <button className={`tab ${tab === "projects" ? "active" : ""}`} onClick={() => setTab("projects")}>{t.nav.projects || "Proyectos"}</button>
-          <button className={`tab ${tab === "requests" ? "active" : ""}`} onClick={() => setTab("requests")}>{t.nav.requests || "Solicitudes"}</button>
-          <button className={`tab ${tab === "log" ? "active" : ""}`} onClick={() => setTab("log")}>{t.nav.log}</button>
-          <button className={`tab ${tab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>{t.nav.admin}</button>
-          {state.config?.isRegional && (
-            <button className={`tab ${tab === "regional" ? "active" : ""}`} onClick={() => setTab("regional")}>🌐 Regional</button>
+          <button className={`tab ${effectiveTab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>{t.nav.documents}</button>
+          <button className={`tab ${effectiveTab === "projects" ? "active" : ""}`} onClick={() => setTab("projects")}>{t.nav.projects || "Proyectos"}</button>
+          <button className={`tab ${effectiveTab === "requests" ? "active" : ""}`} onClick={() => setTab("requests")}>{t.nav.requests || "Solicitudes"}</button>
+          {canViewLog && <button className={`tab ${effectiveTab === "log" ? "active" : ""}`} onClick={() => setTab("log")}>{t.nav.log}</button>}
+          {canAdmin && <button className={`tab ${effectiveTab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>{t.nav.admin}</button>}
+          {canRegional && (
+            <button className={`tab ${effectiveTab === "regional" ? "active" : ""}`} onClick={() => setTab("regional")}>🌐 Regional</button>
           )}
         </nav>
         <button
@@ -306,32 +321,40 @@ function App() {
           className="user-chip"
           title={useBackend ? `${currentUser?.email || ""} — clic para cerrar sesión` : currentUser?.email}
           onClick={() => {
+            if (isImpersonating) { setImpersonateId(null); return; }
             if (!useBackend) return;
             if (confirm("¿Cerrar sesión?")) {
               window.DocuApi.signOut().then(() => location.reload());
             }
           }}
-          style={useBackend ? { cursor: "pointer" } : undefined}
+          style={(useBackend || isImpersonating) ? { cursor: "pointer" } : undefined}
         >
           <span className="avatar">{(currentUser?.name || "?").split(" ").map(p => p[0]).slice(0,2).join("")}</span>
           <span>{currentUser?.name}</span>
         </div>
       </header>
 
+      {isImpersonating && (
+        <div style={{ background: "#fef3c7", color: "#92400e", padding: "8px 16px", display: "flex", alignItems: "center", gap: 12, fontSize: 13, borderBottom: "1px solid #fde68a" }}>
+          <span>👁 {t.common?.viewingAs || "Viendo como"}: <strong>{currentUser?.name}</strong> · {(t.admin?.role && t.admin.role[currentRole]) || currentRole}</span>
+          <button className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={() => setImpersonateId(null)}>{t.common?.exitViewAs || "Salir de la vista"}</button>
+        </div>
+      )}
+
       <main className="main">
-        {tab === "documents" && (
+        {effectiveTab === "documents" && (
           <DocumentsPage
             state={state} setState={setState} t={t} lang={lang}
-            openViewer={openViewer} log={log} density={tweaks.density}
+            openViewer={openViewer} log={log} density={tweaks.density} can={can} viewerUser={currentUser}
           />
         )}
-        {tab === "log" && <LogPage state={state} t={t} lang={lang} />}
-        {tab === "admin" && <AdminPage state={state} setState={setState} t={t} lang={lang} log={log} />}
-        {tab === "regional" && state.config?.isRegional && (
-          <window.RegionalPanel state={state} t={t} lang={lang} switchHotel={switchHotel} pushToast={pushToast} />
+        {effectiveTab === "log" && <LogPage state={state} t={t} lang={lang} />}
+        {effectiveTab === "admin" && <AdminPage state={state} setState={setState} t={t} lang={lang} log={log} onImpersonate={(uid) => { setImpersonateId(uid); setTab("documents"); }} />}
+        {effectiveTab === "regional" && (
+          <window.RegionalPanel state={state} setState={setState} t={t} lang={lang} switchHotel={switchHotel} pushToast={pushToast} />
         )}
-        {tab === "projects" && <window.ProjectsPage state={state} setState={setState} t={t} lang={lang} log={log} openViewer={openViewer} />}
-        {tab === "requests" && <window.RequestsPage state={state} setState={setState} t={t} lang={lang} log={log} />}
+        {effectiveTab === "projects" && <window.ProjectsPage state={state} setState={setState} t={t} lang={lang} log={log} openViewer={openViewer} />}
+        {effectiveTab === "requests" && <window.RequestsPage state={state} setState={setState} t={t} lang={lang} log={log} />}
       </main>
 
       {viewerDoc && (
