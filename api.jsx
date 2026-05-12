@@ -317,12 +317,16 @@
       if (!prev || JSON.stringify(prev) !== JSON.stringify(r)) {
         const { error } = await client.from("requests").upsert(reqToRow(r, hotelId), { onConflict: "id" });
         if (error) { console.error("[requests] upsert", error); continue; }
-        // Items: replace all (simpler than diff)
-        await client.from("request_items").delete().eq("request_id", id);
+        // Items: upsert the current ones and delete only the removed ones, so
+        // request_uploads rows (FK on delete cascade) survive an edit.
+        const keepIds = (r.items || []).map((it) => it.id);
+        const { data: existingItems } = await client.from("request_items").select("id").eq("request_id", id);
+        const removedIds = (existingItems || []).map((x) => x.id).filter((x) => !keepIds.includes(x));
+        if (removedIds.length) await client.from("request_items").delete().in("id", removedIds);
         if (r.items?.length) {
-          await client.from("request_items").insert(r.items.map((it, i) => ({
+          await client.from("request_items").upsert(r.items.map((it, i) => ({
             id: it.id, request_id: id, title: it.title, comments: it.comments || "", required: !!it.required, sort: i,
-          })));
+          })), { onConflict: "id" });
         }
       }
       // Append new log entries
@@ -420,6 +424,24 @@
   async function requestLog(token, action, details) {
     if (offline) return;
     await client.rpc("request_log_append", { p_token: token, p_action: action, p_details: details || "" });
+  }
+
+  async function requestDeleteUpload(token, uploadId) {
+    if (offline) return;
+    const { error } = await client.rpc("request_upload_delete", { p_token: token, p_upload_id: uploadId });
+    if (error) throw error;
+  }
+
+  async function requestSaveProgress(token) {
+    if (offline) return;
+    const { error } = await client.rpc("request_save_progress", { p_token: token });
+    if (error) throw error;
+  }
+
+  async function requestSubmit(token) {
+    if (offline) return;
+    const { error } = await client.rpc("request_submit", { p_token: token });
+    if (error) throw error;
   }
 
   // ── Regional / multi-hotel ──────────────────────────────────────────
@@ -537,6 +559,7 @@
     loadFullState, saveDiff,
     uploadDocFile, uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
+    requestDeleteUpload, requestSaveProgress, requestSubmit,
     listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
     listAllUsers, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,

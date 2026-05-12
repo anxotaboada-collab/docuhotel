@@ -406,6 +406,9 @@ drop function if exists public_documents(text);
 drop function if exists audit_project(text);
 drop function if exists request_by_token(text);
 drop function if exists request_log_append(text, text, text);
+drop function if exists request_upload_delete(text, text);
+drop function if exists request_save_progress(text);
+drop function if exists request_submit(text);
 
 -- Documents marked as public_access can be read by anyone who knows hotel.public_token.
 -- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
@@ -479,6 +482,72 @@ begin
 end;
 $fn$;
 grant execute on function request_log_append(text, text, text) to anon, authenticated;
+
+-- Soft-delete an upload, by the anonymous uploader, while the request is still
+-- open (i.e. not submitted/expired). Sets request_uploads.deleted_at so
+-- request_by_token (and the admin's load) stop counting it.
+create function request_upload_delete(p_token text, p_upload_id text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+declare
+  v_request_id text;
+begin
+  select r.id into v_request_id
+    from requests r
+   where r.share_token = p_token
+     and r.status in ('open','saved')
+     and r.expires_at > now()
+     and r.submitted_at is null;
+  if v_request_id is null then
+    raise exception 'invalid token or request closed';
+  end if;
+  update request_uploads u
+     set deleted_at = now()
+    from request_items i
+   where u.id = p_upload_id
+     and i.id = u.request_item_id
+     and i.request_id = v_request_id
+     and u.deleted_at is null;
+end;
+$fn$;
+grant execute on function request_upload_delete(text, text) to anon, authenticated;
+
+-- Mark the request as "in progress" (draft saved by the uploader).
+create function request_save_progress(p_token text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+begin
+  update requests
+     set saved_at = now(),
+         status = case when status = 'open' then 'saved' else status end,
+         updated_at = now()
+   where share_token = p_token
+     and submitted_at is null
+     and expires_at > now();
+  if not found then raise exception 'invalid token or request closed'; end if;
+end;
+$fn$;
+grant execute on function request_save_progress(text) to anon, authenticated;
+
+-- Final submit by the uploader: locks the request (no more uploads).
+create function request_submit(p_token text)
+returns void
+language plpgsql security definer set search_path = public
+as $fn$
+begin
+  update requests
+     set submitted_at = now(),
+         status = 'submitted',
+         updated_at = now()
+   where share_token = p_token
+     and submitted_at is null
+     and expires_at > now();
+  if not found then raise exception 'invalid token or request closed'; end if;
+end;
+$fn$;
+grant execute on function request_submit(text) to anon, authenticated;
 
 -- ───────────────────────────────────────────────────────────────────
 -- Activity & email logs
