@@ -494,18 +494,22 @@ function loadStateFromBackend(targetHotelId) {
 
 async function _loadStateFromBackend(targetHotelId) {
   if (!window.DocuApi || window.DocuApi.offline) return loadState();
+  const _t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const _perf = (label) => console.info(`[docuhotel] ${label}: ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - _t0)}ms`);
   // Note: we intentionally do NOT swallow errors here — getMe()/loadFullState()
   // throw with a descriptive message that the boot screen surfaces to the user.
   const [me, accessible] = await Promise.all([
     window.DocuApi.getMe(),
     window.DocuApi.listAccessibleHotels(),
   ]);
+  _perf("getMe + listAccessibleHotels");
   if (!me) return null; // not authenticated → caller will show login
   const wanted = targetHotelId && accessible.find((h) => h.id === targetHotelId) ? targetHotelId : me.hotel.id;
   const loadedHotel = accessible.find((h) => h.id === wanted) || {
     id: me.hotel.id, name: me.hotel.name, country: me.hotel.country, timezone: me.hotel.timezone, publicToken: me.hotel.public_token,
   };
   const s = await window.DocuApi.loadFullState(wanted);
+  _perf("loadStateFromBackend total");
   if (!s) return null;
   // Bridge: populate config with auth-derived currentUserId + public token.
   const def = defaultState().config;
