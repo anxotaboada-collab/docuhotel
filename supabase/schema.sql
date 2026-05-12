@@ -303,19 +303,21 @@ alter table email_log       enable row level security;
 alter table email_templates enable row level security;
 alter table hotel_config    enable row level security;
 
--- Hotels: a user can read its own hotel; only admin can update.
+-- Hotels: a user can read any hotel it can access; admins (or regional) can update.
 drop policy if exists hotels_select on hotels;
-create policy hotels_select on hotels for select using (id = current_hotel_id());
+create policy hotels_select on hotels for select using (user_can_access(id));
 drop policy if exists hotels_admin_update on hotels;
-create policy hotels_admin_update on hotels for update using (id = current_hotel_id() and current_user_role() = 'admin');
+create policy hotels_admin_update on hotels for update
+  using ((user_can_access(id) and current_user_role() = 'admin') or user_is_regional())
+  with check ((user_can_access(id) and current_user_role() = 'admin') or user_is_regional());
 
--- app_users: see everyone in your hotel; admins manage.
+-- app_users: see everyone in your hotel(s) + yourself; admins/regional manage.
 drop policy if exists app_users_select on app_users;
-create policy app_users_select on app_users for select using (hotel_id = current_hotel_id());
+create policy app_users_select on app_users for select using (id = auth.uid() or user_can_access(hotel_id));
 drop policy if exists app_users_admin_write on app_users;
 create policy app_users_admin_write on app_users
-  for all using (hotel_id = current_hotel_id() and current_user_role() = 'admin')
-  with check (hotel_id = current_hotel_id() and current_user_role() = 'admin');
+  for all using ((user_can_access(hotel_id) and current_user_role() = 'admin') or user_is_regional())
+  with check ((user_can_access(hotel_id) and current_user_role() = 'admin') or user_is_regional());
 drop policy if exists app_users_self_update on app_users;
 create policy app_users_self_update on app_users for update using (id = auth.uid()) with check (id = auth.uid());
 
@@ -328,55 +330,69 @@ begin
     'projects','email_templates','hotel_config'
   ]) loop
     execute format('drop policy if exists %1$I_select on %1$I', t);
-    execute format('create policy %1$I_select on %1$I for select using (hotel_id = current_hotel_id())', t);
+    execute format('create policy %1$I_select on %1$I for select using (user_can_access(hotel_id))', t);
     execute format('drop policy if exists %1$I_admin_write on %1$I', t);
-    execute format('create policy %1$I_admin_write on %1$I for all using (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head'')) with check (hotel_id = current_hotel_id() and current_user_role() in (''admin'',''dept_head''))', t);
+    execute format('create policy %1$I_admin_write on %1$I for all using ((user_can_access(hotel_id) and current_user_role() in (''admin'',''dept_head'')) or user_is_regional()) with check ((user_can_access(hotel_id) and current_user_role() in (''admin'',''dept_head'')) or user_is_regional())', t);
   end loop;
 end
 $do$;
 
--- Documents: select scoped by department visibility.
+-- Documents: visible if you can access the hotel (with dept scoping) OR the doc
+-- is a regional/corporate doc shared into one of your hotels (document_hotels).
 drop policy if exists documents_select on documents;
 create policy documents_select on documents
   for select using (
-    hotel_id = current_hotel_id()
-    and (
-      current_user_role() = 'admin'
-      or '*' = any(departments)
-      or current_departments() && departments
-      or '*' = any(current_departments())
+    (
+      user_can_access(hotel_id)
+      and (
+        current_user_role() = 'admin'
+        or user_is_regional()
+        or '*' = any(departments)
+        or current_departments() && departments
+        or '*' = any(current_departments())
+      )
+    )
+    or exists (
+      select 1 from document_hotels dh
+      where dh.document_id = documents.id and user_can_access(dh.hotel_id)
     )
   );
 
 drop policy if exists documents_write on documents;
 create policy documents_write on documents
   for all using (
-    hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head')
+    user_is_regional()
+    or (user_can_access(hotel_id) and current_user_role() in ('admin','dept_head'))
+    or exists (select 1 from document_hotels dh where dh.document_id = documents.id
+               and user_can_access(dh.hotel_id) and current_user_role() in ('admin','dept_head'))
   ) with check (
-    hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head')
+    user_is_regional()
+    or (user_can_access(hotel_id) and current_user_role() in ('admin','dept_head'))
+    or exists (select 1 from document_hotels dh where dh.document_id = documents.id
+               and user_can_access(dh.hotel_id) and current_user_role() in ('admin','dept_head'))
   );
 
--- Requests + items + uploads + log: admin/dept_head; public access via share_token handled in client by anon key
+-- Requests + items + uploads + log: admin/dept_head (or regional); public access via share_token handled in client by anon key
 drop policy if exists requests_rw on requests;
 create policy requests_rw on requests
-  for all using (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'))
-  with check (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'));
+  for all using ((user_can_access(hotel_id) and current_user_role() in ('admin','dept_head')) or user_is_regional())
+  with check ((user_can_access(hotel_id) and current_user_role() in ('admin','dept_head')) or user_is_regional());
 
 drop policy if exists request_items_rw on request_items;
 create policy request_items_rw on request_items
-  for all using (exists (select 1 from requests r where r.id = request_id and r.hotel_id = current_hotel_id()))
-  with check (exists (select 1 from requests r where r.id = request_id and r.hotel_id = current_hotel_id()));
+  for all using (exists (select 1 from requests r where r.id = request_id and (user_can_access(r.hotel_id) or user_is_regional())))
+  with check (exists (select 1 from requests r where r.id = request_id and (user_can_access(r.hotel_id) or user_is_regional())));
 
 drop policy if exists request_uploads_rw on request_uploads;
 create policy request_uploads_rw on request_uploads
   for all using (exists (
     select 1 from request_items i join requests r on r.id = i.request_id
-    where i.id = request_item_id and r.hotel_id = current_hotel_id()
+    where i.id = request_item_id and (user_can_access(r.hotel_id) or user_is_regional())
   )) with check (true);
 
 drop policy if exists request_log_rw on request_log;
 create policy request_log_rw on request_log
-  for all using (exists (select 1 from requests r where r.id = request_id and r.hotel_id = current_hotel_id()))
+  for all using (exists (select 1 from requests r where r.id = request_id and (user_can_access(r.hotel_id) or user_is_regional())))
   with check (true);
 
 -- ───────────────────────────────────────────────────────────────────
@@ -470,16 +486,95 @@ grant execute on function request_log_append(text, text, text) to anon, authenti
 
 drop policy if exists activity_log_select on activity_log;
 create policy activity_log_select on activity_log
-  for select using (hotel_id = current_hotel_id() and current_user_role() in ('admin','dept_head'));
+  for select using ((user_can_access(hotel_id) and current_user_role() in ('admin','dept_head')) or user_is_regional());
 
 drop policy if exists activity_log_insert on activity_log;
 create policy activity_log_insert on activity_log
-  for insert with check (hotel_id = current_hotel_id());
+  for insert with check (user_can_access(hotel_id) or user_is_regional());
 
 drop policy if exists email_log_select on email_log;
 create policy email_log_select on email_log
-  for select using (hotel_id = current_hotel_id() and current_user_role() = 'admin');
+  for select using ((user_can_access(hotel_id) and current_user_role() = 'admin') or user_is_regional());
 
 drop policy if exists email_log_insert on email_log;
 create policy email_log_insert on email_log
-  for insert with check (hotel_id = current_hotel_id());
+  for insert with check (user_can_access(hotel_id) or user_is_regional());
+
+-- ───────────────────────────────────────────────────────────────────
+-- Multi-hotel / regional access — PHASE 1 (additive only; no policy
+-- changes here, so this section can't break existing single-hotel use).
+-- ───────────────────────────────────────────────────────────────────
+
+-- "Regional admin": can access every hotel in the system.
+alter table app_users add column if not exists is_regional boolean not null default false;
+
+-- Extra hotels a (non-regional) user may access, beyond app_users.hotel_id.
+create table if not exists user_hotels (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  hotel_id   uuid not null references hotels(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, hotel_id)
+);
+create index if not exists idx_user_hotels_user on user_hotels(user_id);
+alter table user_hotels enable row level security;
+
+-- A regional/corporate document is a *single* documents row that is also
+-- visible in the hotels listed here (no duplication). Empty for hotel-local docs.
+create table if not exists document_hotels (
+  document_id text not null references documents(id) on delete cascade,
+  hotel_id    uuid not null references hotels(id) on delete cascade,
+  primary key (document_id, hotel_id)
+);
+create index if not exists idx_document_hotels_hotel on document_hotels(hotel_id);
+alter table document_hotels enable row level security;
+
+-- Registry: each regional upload — what document, who, when, which hotels.
+create table if not exists regional_uploads (
+  id          uuid primary key default gen_random_uuid(),
+  document_id text references documents(id) on delete set null,
+  uploaded_by uuid references auth.users(id) on delete set null,
+  title       text,
+  hotel_ids   uuid[] not null default '{}',
+  created_at  timestamptz not null default now()
+);
+alter table regional_uploads enable row level security;
+
+-- Helpers (SECURITY DEFINER so they aren't blocked by the tables' own RLS).
+create or replace function user_is_regional() returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select coalesce((select is_regional from app_users where id = auth.uid()), false);
+$fn$;
+
+-- Every hotel id the current user may access (regional → all hotels).
+create or replace function user_hotel_ids() returns uuid[]
+language sql stable security definer set search_path = public as $fn$
+  select case
+    when user_is_regional() then array(select id from hotels)
+    else array(
+      select hotel_id from app_users where id = auth.uid()
+      union
+      select hotel_id from user_hotels where user_id = auth.uid()
+    )
+  end;
+$fn$;
+
+create or replace function user_can_access(p_hotel_id uuid) returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select p_hotel_id = any(user_hotel_ids());
+$fn$;
+
+-- RLS for the new tables only (does not touch existing tables).
+drop policy if exists user_hotels_select on user_hotels;
+create policy user_hotels_select on user_hotels for select using (user_id = auth.uid() or user_is_regional());
+drop policy if exists user_hotels_regional_write on user_hotels;
+create policy user_hotels_regional_write on user_hotels for all using (user_is_regional()) with check (user_is_regional());
+
+drop policy if exists document_hotels_select on document_hotels;
+create policy document_hotels_select on document_hotels for select using (user_can_access(hotel_id));
+drop policy if exists document_hotels_regional_write on document_hotels;
+create policy document_hotels_regional_write on document_hotels for all using (user_is_regional()) with check (user_is_regional());
+
+drop policy if exists regional_uploads_select on regional_uploads;
+create policy regional_uploads_select on regional_uploads for select using (user_is_regional());
+drop policy if exists regional_uploads_regional_write on regional_uploads;
+create policy regional_uploads_regional_write on regional_uploads for all using (user_is_regional()) with check (user_is_regional());
