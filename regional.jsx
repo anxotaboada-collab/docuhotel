@@ -252,13 +252,18 @@ function RegionalUsers({ hotels, hotelName, pushToast }) {
     } finally { setBusy(false); }
   };
 
+  const [creating, setCreating] = React.useState(false);
+
   if (users === null) return <div className="empty-state">Cargando…</div>;
   return (
     <div>
-      <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 13 }}>
-        Marca un usuario como <strong>regional</strong> (ve todos los hoteles) o asígnale 1, 2 o más hoteles concretos.
-        Su hotel principal (el de su ficha) siempre está incluido.
-      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13, flex: 1 }}>
+          Crea usuarios nuevos (con su cuenta de acceso), márcalos como <strong>regional</strong> (ven todos los hoteles)
+          o asígnales 1, 2 o más hoteles concretos. Su hotel principal (el de su ficha) siempre está incluido.
+        </p>
+        <button className="btn btn-sm btn-primary" onClick={() => setCreating(true)}>➕ Crear usuario</button>
+      </div>
       <div className="table-wrap">
         <table className="table">
           <thead><tr><th>Usuario</th><th>Rol</th><th>Acceso</th><th style={{ width: 90 }}></th></tr></thead>
@@ -274,6 +279,9 @@ function RegionalUsers({ hotels, hotelName, pushToast }) {
           </tbody>
         </table>
       </div>
+      {creating && (
+        <RegionalCreateUser hotels={hotels} pushToast={pushToast} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); reload(); }} />
+      )}
       {editing && (
         <Modal size="md" title={`Acceso de ${editing.user.name}`} onClose={() => setEditing(null)}
           footer={<><button className="btn btn-ghost" onClick={() => setEditing(null)} disabled={busy}>Cancelar</button><button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? "Guardando…" : "Guardar"}</button></>}>
@@ -300,6 +308,81 @@ function RegionalUsers({ hotels, hotelName, pushToast }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+// ── Create a brand-new user (Auth account + app_users row) ────────────
+function RegionalCreateUser({ hotels, pushToast, onClose, onCreated }) {
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [hotelId, setHotelId] = React.useState(hotels[0]?.id || "");
+  const [role, setRole] = React.useState("employee");
+  const [isRegional, setIsRegional] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    setError("");
+    if (!email.trim()) { setError("Pon un email."); return; }
+    if (password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (!hotelId) { setError("Selecciona el hotel principal."); return; }
+    setBusy(true);
+    try {
+      const res = await window.DocuApi.createAppUser({
+        email: email.trim(), password, name: name.trim(), hotelId, role, isRegional,
+      });
+      pushToast && pushToast(`✓ Usuario "${email.trim()}" creado` + (res?.needsEmailConfirm ? " (debe confirmar su email)" : ""));
+      onCreated && onCreated();
+    } catch (err) {
+      setError("No se pudo crear: " + (err?.message || err));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal size="md" title="Crear usuario nuevo" onClose={onClose}
+      footer={<><button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? "Creando…" : "Crear usuario"}</button></>}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 12.5 }}>
+          Se crea la cuenta de acceso y el perfil. Comparte la contraseña con la persona; podrá cambiarla al entrar.
+          Si tu proyecto de Supabase exige confirmación por email, recibirá un enlace para activarla.
+        </p>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Nombre</span>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Marta García" />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Email *</span>
+          <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="marta@hotel.com" />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>Contraseña inicial * (mín. 6)</span>
+          <input className="input" type="text" value={password} onChange={e => setPassword(e.target.value)} placeholder="contraseña temporal" autoComplete="new-password" />
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Hotel principal *</span>
+            <select className="select" value={hotelId} onChange={e => setHotelId(e.target.value)}>
+              {hotels.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Rol</span>
+            <select className="select" value={role} onChange={e => setRole(e.target.value)}>
+              <option value="admin">Administrador</option>
+              <option value="dept_head">Jefe de departamento</option>
+              <option value="employee">Empleado</option>
+            </select>
+          </label>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+          <input type="checkbox" checked={isRegional} onChange={e => setIsRegional(e.target.checked)} />
+          🌐 Admin regional (master) — acceso a todos los hoteles
+        </label>
+        {error && <div style={{ color: "var(--danger, #b91c1c)", background: "var(--danger-bg, #fee2e2)", padding: 8, borderRadius: 6, fontSize: 13 }}>{error}</div>}
+      </form>
+    </Modal>
   );
 }
 
