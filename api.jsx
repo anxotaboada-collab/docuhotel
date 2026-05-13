@@ -6,6 +6,7 @@
 (function () {
   const cfg = window.DOCUHOTEL_CONFIG || {};
   const offline = !!cfg.offlineMode || !cfg.supabaseUrl || !cfg.supabaseAnonKey || !window.supabase;
+  const noAuth = !offline && !!cfg.noAuth;
 
   const client = offline
     ? null
@@ -132,6 +133,27 @@
 
   async function getMe(preloadedSession) {
     if (offline) return null;
+    // No-auth mode: skip every GoTrue call and fabricate a synthetic profile
+    // backed by the first accessible hotel. RLS must be open to anon for this
+    // to read anything — see supabase/open_rls_anon.sql.
+    if (noAuth) {
+      const { data, error } = await client.from("hotels").select("*").order("name").limit(1).maybeSingle();
+      if (error) {
+        throw new Error("No se pudieron leer los hoteles (modo sin login). Revisa que open_rls_anon.sql esté aplicado en Supabase. Detalle: " + error.message);
+      }
+      if (!data) {
+        throw new Error("No hay ningún hotel en la base de datos. Crea al menos uno desde Supabase para usar el modo sin login.");
+      }
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      return {
+        authUser: { id: fakeId, email: "anon@docuhotel" },
+        profile: {
+          id: fakeId, name: "Invitado", email: "anon@docuhotel",
+          role: "admin", departments: ["*"], is_regional: true, hotel_id: data.id,
+        },
+        hotel: data,
+      };
+    }
     // Prefer a session that the caller already obtained (boot path passes the
     // one it just fetched). Otherwise read the cached session locally. Only
     // fall back to auth.getUser() — a GoTrue round-trip — when neither is
@@ -639,6 +661,7 @@
 
   window.DocuApi = {
     offline,
+    noAuth,
     client,
     getSession, getMe,
     loadFullState, saveDiff,

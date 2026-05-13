@@ -80,6 +80,17 @@ function App() {
     let cancelled = false;
     const boot = async () => {
       try {
+        // No-auth mode skips GoTrue entirely (which is the slow service on
+        // free-tier Supabase). Goes straight to loading state via the anon
+        // key. RLS policies in open_rls_anon.sql must allow this.
+        if (window.DocuApi.noAuth) {
+          const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 60000, "loadState");
+          if (cancelled) return;
+          if (!next) { setBootError("No pudimos cargar los datos. Comprueba que open_rls_anon.sql esté aplicado."); setBootStatus("error"); return; }
+          setStateRaw(next);
+          setBootStatus("ready");
+          return;
+        }
         // Timeouts are generous on purpose: Supabase free-tier projects pause
         // after inactivity and the first request can take ~30-60s to wake up
         // GoTrue + Postgres. Aborting earlier just leaves users on an error
