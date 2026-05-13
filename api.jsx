@@ -111,15 +111,18 @@
     return data.session;
   }
 
-  async function getMe() {
+  async function getMe(preloadedSession) {
     if (offline) return null;
-    // Use the cached session (a local read, no network round-trip) instead of
-    // auth.getUser() — which hits GoTrue's /user endpoint every time and is a
-    // big chunk of the login latency. Fall back to getUser() only when there is
-    // no cached session, so an expired/missing token still surfaces cleanly.
-    let user = null;
-    const { data: sessData } = await client.auth.getSession();
-    user = sessData?.session?.user || null;
+    // Prefer a session that the caller already obtained (boot path passes the
+    // one it just fetched). Otherwise read the cached session locally. Only
+    // fall back to auth.getUser() — a GoTrue round-trip — when neither is
+    // available, since on a cold-started project that call can hang for ~30s
+    // while it waits for the auth service to wake up.
+    let user = preloadedSession?.user || null;
+    if (!user) {
+      const { data: sessData } = await client.auth.getSession();
+      user = sessData?.session?.user || null;
+    }
     if (!user) {
       const { data: { user: u } = {}, error: userErr } = await client.auth.getUser();
       if (userErr) throw new Error("No se pudo validar la sesión: " + userErr.message);
@@ -483,7 +486,7 @@
 
   async function listAccessibleHotels() {
     if (offline) return [];
-    const { data, error } = await client.from("hotels").select("*").order("name");
+    const { data, error } = await client.from("hotels").select("*").order("name").limit(500);
     if (error) { console.error("listAccessibleHotels", error); return []; }
     return (data || []).map((h) => ({ id: h.id, name: h.name, country: h.country, timezone: h.timezone, publicToken: h.public_token }));
   }
