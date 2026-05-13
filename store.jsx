@@ -481,25 +481,25 @@ function daysUntil(iso) {
 // waterfalls in parallel, which is a big chunk of the "20 seconds to load" pain.
 let _loadInFlight = null;
 let _loadInFlightKey = null;
-function loadStateFromBackend(targetHotelId) {
+function loadStateFromBackend(targetHotelId, preloadedSession) {
   const key = targetHotelId || "__me__";
   if (_loadInFlight && _loadInFlightKey === key) return _loadInFlight;
   _loadInFlightKey = key;
-  _loadInFlight = _loadStateFromBackend(targetHotelId).finally(() => {
+  _loadInFlight = _loadStateFromBackend(targetHotelId, preloadedSession).finally(() => {
     _loadInFlight = null;
     _loadInFlightKey = null;
   });
   return _loadInFlight;
 }
 
-async function _loadStateFromBackend(targetHotelId) {
+async function _loadStateFromBackend(targetHotelId, preloadedSession) {
   if (!window.DocuApi || window.DocuApi.offline) return loadState();
   const _t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
   const _perf = (label) => console.info(`[docuhotel] ${label}: ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - _t0)}ms`);
   // Note: we intentionally do NOT swallow errors here — getMe()/loadFullState()
   // throw with a descriptive message that the boot screen surfaces to the user.
   const [me, accessible] = await Promise.all([
-    window.DocuApi.getMe(),
+    window.DocuApi.getMe(preloadedSession),
     window.DocuApi.listAccessibleHotels(),
   ]);
   _perf("getMe + listAccessibleHotels");
