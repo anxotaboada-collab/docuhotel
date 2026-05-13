@@ -80,10 +80,14 @@ function App() {
     let cancelled = false;
     const boot = async () => {
       try {
-        const session = await withTimeout(window.DocuApi.getSession(), 15000, "getSession");
+        // Timeouts are generous on purpose: Supabase free-tier projects pause
+        // after inactivity and the first request can take ~30-60s to wake up
+        // GoTrue + Postgres. Aborting earlier just leaves users on an error
+        // screen for what is actually a successful (slow) cold start.
+        const session = await withTimeout(window.DocuApi.getSession(), 60000, "getSession");
         if (cancelled) return;
         if (!session) { setBootStatus("login"); return; }
-        const next = await withTimeout(window.DocuStore.loadStateFromBackend(), 30000, "loadState");
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(undefined, session), 60000, "loadState");
         if (cancelled) return;
         if (!next) { setBootError("No pudimos cargar los datos del hotel. Verifica tu cuenta o intenta de nuevo."); setBootStatus("error"); return; }
         setStateRaw(next);
@@ -104,7 +108,7 @@ function App() {
       try {
         if (event === "SIGNED_OUT" || !sess) { setBootStatus("login"); setStateRaw(null); return; }
         setBootStatus("loading");
-        const next = await withTimeout(window.DocuStore.loadStateFromBackend(currentHotelIdRef.current || undefined), 30000, "loadState");
+        const next = await withTimeout(window.DocuStore.loadStateFromBackend(currentHotelIdRef.current || undefined, sess), 60000, "loadState");
         if (next) { setStateRaw(next); setBootStatus("ready"); }
         else { setBootError("No pudimos cargar los datos del hotel."); setBootStatus("error"); }
       } catch (e) {
@@ -121,7 +125,7 @@ function App() {
     if (!useBackend || !hid || hid === state?.hotelId) return;
     setBootError(""); setBootStatus("loading");
     try {
-      const next = await withTimeout(window.DocuStore.loadStateFromBackend(hid), 30000, "loadState");
+      const next = await withTimeout(window.DocuStore.loadStateFromBackend(hid), 60000, "loadState");
       if (next) { setTab("documents"); setStateRaw(next); setBootStatus("ready"); }
       else { setBootError("No se pudo cargar ese hotel."); setBootStatus("error"); }
     } catch (e) {
