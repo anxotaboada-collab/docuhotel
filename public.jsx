@@ -2,10 +2,11 @@
 
 function PublicView({ state, t, lang, setLang }) {
   const [openDoc, setOpenDoc] = React.useState(null);
-  const docs = state.documents.filter(d => {
-    const st = state.statuses.find(s => s.id === d.statusId);
-    return d.publicAccess && st?.key === "active";
-  });
+  // The public_documents RPC already returns only public_access + En vigor docs.
+  // Do not re-filter on state.statuses here: per-hotel status rows have ids like
+  // "st_active_<uuid>" while DEFAULT_STATUSES uses "st_active", so the lookup
+  // would always miss and the page would render empty.
+  const docs = state.documents;
 
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" }) : "—";
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(0)} KB` : `${(b/1024/1024).toFixed(1)} MB`;
