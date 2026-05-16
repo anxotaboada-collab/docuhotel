@@ -496,21 +496,38 @@ async function _loadStateFromBackend(targetHotelId, preloadedSession) {
   if (!window.DocuApi || window.DocuApi.offline) return loadState();
   const _t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
   const _perf = (label) => console.info(`[docuhotel] ${label}: ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - _t0)}ms`);
-  // Note: we intentionally do NOT swallow errors here — getMe()/loadFullState()
-  // throw with a descriptive message that the boot screen surfaces to the user.
-  const [me, accessible] = await Promise.all([
-    window.DocuApi.getMe(preloadedSession),
-    window.DocuApi.listAccessibleHotels(),
-  ]);
-  _perf("getMe + listAccessibleHotels");
+  // Phase 1: identify the user + their primary hotel. This is a cheap PK
+  // lookup with one FK join and must succeed before we can do anything.
+  // Errors here propagate so the boot screen can surface them.
+  const me = await window.DocuApi.getMe(preloadedSession);
+  _perf("getMe");
   if (!me) return null; // not authenticated → caller will show login
-  const wanted = targetHotelId && accessible.find((h) => h.id === targetHotelId) ? targetHotelId : me.hotel.id;
-  const loadedHotel = accessible.find((h) => h.id === wanted) || {
-    id: me.hotel.id, name: me.hotel.name, country: me.hotel.country, timezone: me.hotel.timezone, publicToken: me.hotel.public_token,
+  const meHotel = {
+    id: me.hotel.id, name: me.hotel.name, country: me.hotel.country,
+    timezone: me.hotel.timezone, publicToken: me.hotel.public_token,
   };
-  const s = await window.DocuApi.loadFullState(wanted);
+  // Phase 2: load the full hotel state + the accessible-hotels list
+  // concurrently. listAccessibleHotels was blocking startup for 60s+ on
+  // Supabase projects with many hotels because the table-scan RLS path is
+  // O(N²); now it's optional — if it doesn't return in 12s we proceed with
+  // just the user's primary hotel (the switcher will hide or only show one
+  // option, which is fine; the next reload may catch a warmer backend).
+  const wanted = targetHotelId || me.hotel.id;
+  const accessiblePromise = Promise.race([
+    window.DocuApi.listAccessibleHotels().then((arr) => (arr && arr.length ? arr : [meHotel]),
+      (e) => { console.warn("[docuhotel] listAccessibleHotels failed:", e?.message || e); return [meHotel]; }),
+    new Promise((resolve) => setTimeout(() => {
+      console.warn("[docuhotel] listAccessibleHotels >12s; continuing with primary hotel only");
+      resolve([meHotel]);
+    }, 12000)),
+  ]);
+  const [accessible, s] = await Promise.all([
+    accessiblePromise,
+    window.DocuApi.loadFullState(wanted),
+  ]);
   _perf("loadStateFromBackend total");
   if (!s) return null;
+  const loadedHotel = (accessible || []).find((h) => h.id === wanted) || meHotel;
   // Bridge: populate config with auth-derived currentUserId + public token.
   const def = defaultState().config;
   s.config = {

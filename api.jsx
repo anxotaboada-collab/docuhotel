@@ -486,6 +486,24 @@
 
   async function listAccessibleHotels() {
     if (offline) return [];
+    // Fast path: a SECURITY DEFINER RPC that bypasses per-row RLS evaluation
+    // on the `hotels` table. Without it, `select * from hotels` invokes
+    // user_can_access(id) for every row, which on a regional account fans
+    // out to `select id from hotels` again per row — O(N²) — and on Supabase
+    // free-tier projects can take 60s+ for a few hundred hotels. The RPC
+    // computes user_hotel_ids() once and filters by primary-key membership.
+    try {
+      const { data, error } = await client.rpc("list_accessible_hotels");
+      if (!error && Array.isArray(data)) {
+        return data.map((h) => ({ id: h.id, name: h.name, country: h.country, timezone: h.timezone, publicToken: h.public_token }));
+      }
+      if (error && !/function .* does not exist|could not find the function/i.test(error.message || "")) {
+        console.warn("[docuhotel] list_accessible_hotels rpc:", error.message);
+      }
+    } catch (e) {
+      console.warn("[docuhotel] list_accessible_hotels rpc threw:", e?.message || e);
+    }
+    // Fallback when the RPC hasn't been deployed yet (older schema.sql).
     const { data, error } = await client.from("hotels").select("*").order("name").limit(500);
     if (error) { console.error("listAccessibleHotels", error); return []; }
     return (data || []).map((h) => ({ id: h.id, name: h.name, country: h.country, timezone: h.timezone, publicToken: h.public_token }));
