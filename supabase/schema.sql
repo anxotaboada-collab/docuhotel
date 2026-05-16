@@ -494,8 +494,10 @@ drop function if exists request_save_progress(text);
 drop function if exists request_submit(text);
 drop function if exists create_hotel(text, text, text);
 
--- Documents marked as public_access can be read by anyone who knows hotel.public_token.
--- The frontend's "public" route always supplies the token via a SECURITY DEFINER RPC.
+-- Documents marked as public_access AND in "En vigor" (status.key='active') can be
+-- read by anyone who knows hotel.public_token. The status filter happens server-side
+-- because the client cannot match status_id against DEFAULT_STATUSES — per-hotel
+-- status rows have ids like "st_active_<uuid>", not the canonical "st_active".
 create function public_documents(p_token text)
 returns setof documents
 language sql stable security definer set search_path = public
@@ -503,18 +505,28 @@ as $fn$
   select d.*
   from documents d
   join hotels h on h.id = d.hotel_id
-  where h.public_token = p_token and d.public_access = true;
+  join statuses s on s.id = d.status_id
+  where h.public_token = p_token
+    and d.public_access = true
+    and s.key = 'active';
 $fn$;
 grant execute on function public_documents(text) to anon, authenticated;
 
 -- Used by the Storage policy below: tells whether a storage object path belongs
--- to a document flagged public_access. SECURITY DEFINER so it isn't blocked by
--- the documents table's own RLS (anon cannot SELECT documents directly).
+-- to a document flagged public_access AND currently En vigor. Draft public-access
+-- documents stay private until they go active.
 create or replace function is_public_doc_file(p_name text)
 returns boolean
 language sql stable security definer set search_path = public
 as $fn$
-  select exists (select 1 from documents where file_key = p_name and public_access = true);
+  select exists (
+    select 1
+    from documents d
+    join statuses s on s.id = d.status_id
+    where d.file_key = p_name
+      and d.public_access = true
+      and s.key = 'active'
+  );
 $fn$;
 grant execute on function is_public_doc_file(text) to anon, authenticated;
 
