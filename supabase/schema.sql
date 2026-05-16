@@ -357,6 +357,25 @@ language sql stable security definer set search_path = public as $fn$
   select p_hotel_id = any(user_hotel_ids());
 $fn$;
 
+-- Fast hotel-list lookup for the boot path. The equivalent
+-- `select * from hotels` query is forced through the per-row RLS policy,
+-- which on Supabase calls user_hotel_ids() for every row. For a regional
+-- user that helper does its own `select id from hotels`, so the cost is
+-- O(N²) in the number of hotels — easily 60s+ on free-tier projects with
+-- a few hundred hotels. This RPC computes user_hotel_ids() once and does a
+-- single PK-indexed `id = any(...)` filter, which stays O(N).
+create or replace function list_accessible_hotels() returns table (
+  id uuid, name text, country text, timezone text, public_token text
+)
+language sql stable security definer set search_path = public as $fn$
+  select id, name, country, timezone, public_token
+  from hotels
+  where id = any(user_hotel_ids())
+  order by name
+  limit 500;
+$fn$;
+grant execute on function list_accessible_hotels() to authenticated;
+
 drop policy if exists user_hotels_select on user_hotels;
 create policy user_hotels_select on user_hotels for select using (user_id = auth.uid() or user_is_regional());
 drop policy if exists user_hotels_regional_write on user_hotels;
