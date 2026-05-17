@@ -63,17 +63,16 @@ create policy "storage_docs_delete" on storage.objects
 
 -- Anonymous uploaders (public request links) can write to requests/{request_id}/...
 -- but ONLY if a request with that id exists and is not expired/submitted.
+-- The freshness check goes through is_request_open_for_upload(), a SECURITY
+-- DEFINER helper, so it bypasses RLS on the `requests` table (which otherwise
+-- hides every row from anon callers and makes the insert fail with
+-- "new row violates row-level security policy").
 drop policy if exists "storage_requests_anon_write" on storage.objects;
 create policy "storage_requests_anon_write" on storage.objects
   for insert with check (
     bucket_id = 'docuhotel'
     and split_part(name, '/', 1) = 'requests'
-    and exists (
-      select 1 from requests r
-      where r.id = split_part(name, '/', 2)
-        and r.status in ('open','saved')
-        and r.expires_at > now()
-    )
+    and is_request_open_for_upload(split_part(name, '/', 2))
   );
 
 -- Anonymous READ for documents marked as public_access = true.
