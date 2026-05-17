@@ -530,6 +530,25 @@ as $fn$
 $fn$;
 grant execute on function is_public_doc_file(text) to anon, authenticated;
 
+-- Used by the Storage policy below: tells whether a request is in a state
+-- where the anonymous uploader (recipient of the share link) is allowed to
+-- add files — i.e. status open/saved and not expired. SECURITY DEFINER so the
+-- storage policy's check bypasses RLS on the `requests` table, which
+-- otherwise hides every row from anonymous callers and makes the upload fail
+-- with "new row violates row-level security policy".
+create or replace function is_request_open_for_upload(p_request_id text)
+returns boolean
+language sql stable security definer set search_path = public
+as $fn$
+  select exists (
+    select 1 from requests r
+    where r.id = p_request_id
+      and r.status in ('open','saved')
+      and r.expires_at > now()
+  );
+$fn$;
+grant execute on function is_request_open_for_upload(text) to anon, authenticated;
+
 -- Project audit: validate share token and return docs.
 create function audit_project(p_token text)
 returns table(project jsonb, docs jsonb)
