@@ -105,6 +105,12 @@ function App() {
       // refreshes must NOT trigger a full reload (it duplicates the startup work
       // and would drop any unsaved local edits). Only react to real transitions.
       if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
+      // supabase-js fires SIGNED_IN not just on actual sign-in but also on tab
+      // visibility/storage re-sync (e.g. when the user opens a doc in a new tab
+      // and returns). If we already have state loaded, that SIGNED_IN is a false
+      // positive — ignore it. Real first-time logins are handled by boot() and
+      // by the SIGNED_IN that fires with no prior state.
+      if (event === "SIGNED_IN" && currentHotelIdRef.current) return;
       try {
         if (event === "SIGNED_OUT" || !sess) { setBootStatus("login"); setStateRaw(null); return; }
         setBootStatus("loading");
