@@ -10,8 +10,27 @@
   const client = offline
     ? null
     : window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+        // autoRefreshToken: false -- the free-tier GoTrue on t4g.nano can take
+        // 30-120s per /token refresh, and supabase-js holds an internal lock
+        // while a refresh is in flight which blocks every PostgREST query
+        // behind it. The DB itself is fast (~200ms), so the app appears stuck
+        // on "Cargando datos del hotel…" for minutes when in reality it is
+        // only auth that is slow.
+        //
+        // Trade-off: access tokens are valid 1h; after that, queries will
+        // return 401 and the app will route the user to login. We refresh
+        // manually below on a long interval, far from the critical path.
+        auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false },
       });
+
+  // Background, non-blocking refresh: every 50 minutes try to extend the
+  // session. Failures are silent — if the access token expires, the next
+  // failing request will surface a login prompt via the normal auth flow.
+  if (client) {
+    setInterval(() => {
+      client.auth.refreshSession().catch(() => {});
+    }, 50 * 60 * 1000);
+  }
 
   // ── Mapping helpers (camelCase ↔ snake_case) ───────────────────────
 
