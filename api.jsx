@@ -679,5 +679,8 @@
     createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
+    // Exposed so the public-route bootstrap (audit_project RPC, etc.) can
+    // map snake_case DB rows into the camelCase shape the views expect.
+    docFromRow, projFromRow,
   };
 })();

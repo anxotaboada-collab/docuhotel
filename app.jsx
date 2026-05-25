@@ -49,11 +49,20 @@ function App() {
           const res = await window.DocuApi.auditProject(m2[1]);
           if (cancelled) return;
           if (!res) { setStateRaw({ ...def, projects: [] }); }
-          else setStateRaw({
-            ...def,
-            documents: res.docs || [],
-            projects: [{ ...res.project, shareToken: m2[1], docIds: (res.docs || []).map(d => d.id) }],
-          });
+          else {
+            // The RPC returns rows in snake_case (and strips share_token).
+            // Map them with the same helpers the authenticated path uses so
+            // the audit view sees camelCase fields (shareExpiresAt, fileKey,
+            // categoryId, etc.) — otherwise the expiry check fails and the
+            // "Enlace caducado" screen is shown even for a valid link.
+            const docs = (res.docs || []).map(window.DocuApi.docFromRow);
+            const proj = {
+              ...window.DocuApi.projFromRow(res.project),
+              shareToken: m2[1],
+              docIds: docs.map(d => d.id),
+            };
+            setStateRaw({ ...def, documents: docs, projects: [proj] });
+          }
         } else if (m3) {
           const req = await window.DocuApi.requestByToken(m3[1]);
           if (cancelled) return;
