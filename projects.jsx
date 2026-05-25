@@ -7,11 +7,14 @@ function ProjectsPage({ state, setState, t, lang, log, openViewer }) {
   const create = () => setEditingId("new");
   const editing = editingId === "new" ? null : projects.find(p => p.id === editingId);
 
-  const save = (proj) => {
+  const save = (proj, opts) => {
     const isNew = !projects.find(p => p.id === proj.id);
     setState(s => ({ ...s, projects: isNew ? [...(s.projects || []), proj] : s.projects.map(p => p.id === proj.id ? proj : p) }));
     log(isNew ? "project_create" : "project_update", proj.name);
-    setEditingId(null);
+    // opts.stay is set by generateShare so the editor remains open after the
+    // share token is persisted — the user can immediately copy the link.
+    if (opts && opts.stay) setEditingId(proj.id);
+    else setEditingId(null);
   };
 
   const remove = (id) => {
@@ -139,10 +142,27 @@ function ProjectEditor({ state, setState, t, lang, log, project, onSave, onCance
   const addDocs = (ids) => { setDocIds(prev => Array.from(new Set([...prev, ...ids]))); setShowPicker(false); };
 
   const generateShare = (days) => {
+    if (!name.trim()) {
+      alert(t.projects?.nameFirst || "Pon un nombre al proyecto antes de generar el enlace.");
+      return;
+    }
     const token = "audit-" + Math.random().toString(36).slice(2, 12);
     const expires = new Date(Date.now() + days * 86400000).toISOString();
     setShareToken(token);
     setShareExpiresAt(expires);
+    // Persist right away. Without this the share_token stayed null in the DB
+    // until the user pressed Save manually, and the audit link returned
+    // "Enlace caducado" because audit_project() could not match the token.
+    const proj = {
+      id: project?.id || window.DocuStore.uid("proj"),
+      name: name.trim(),
+      notes, status, docIds,
+      shareToken: token,
+      shareExpiresAt: expires,
+      createdAt: project?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    onSave(proj, { stay: true });
     log("project_share", `${name} → ${days} días`);
   };
   const revokeShare = () => {

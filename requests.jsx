@@ -182,6 +182,55 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
     if (!href) { alert(t.requests?.cannotOpen || "No se pudo abrir el archivo."); return; }
     window.open(href, "_blank", "noopener,noreferrer");
   };
+
+  const [downloadingAll, setDownloadingAll] = React.useState(false);
+  const totalFiles = items.reduce((n, it) => n + (it.files?.length || 0), 0);
+  const downloadAll = async () => {
+    if (downloadingAll) return;
+    const allFiles = items.flatMap(it => (it.files || []).map(f => ({ ...f, itemTitle: it.title })));
+    if (allFiles.length === 0) { alert(t.requests?.nothingToDownload || "No hay archivos para descargar."); return; }
+    if (!window.JSZip) { alert("No se pudo cargar la librería ZIP. Recarga la página."); return; }
+    setDownloadingAll(true);
+    try {
+      const zip = new window.JSZip();
+      const safe = (s) => (s || "sin-titulo").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+      const used = new Set();
+      let ok = 0, fail = 0;
+      for (const f of allFiles) {
+        try {
+          let blob = null;
+          if (f.dataUrl) {
+            const r = await fetch(f.dataUrl); blob = await r.blob();
+          } else if (f.key && window.DocuApi && !window.DocuApi.offline) {
+            const url = await window.DocuApi.signedUrl(f.key);
+            if (url) { const r = await fetch(url); blob = await r.blob(); }
+          }
+          if (!blob) { fail++; continue; }
+          let path = `${safe(f.itemTitle)}/${f.name}`;
+          let n = 2;
+          while (used.has(path)) {
+            const dot = f.name.lastIndexOf(".");
+            const base = dot > 0 ? f.name.slice(0, dot) : f.name;
+            const ext = dot > 0 ? f.name.slice(dot) : "";
+            path = `${safe(f.itemTitle)}/${base} (${n})${ext}`;
+            n++;
+          }
+          used.add(path);
+          zip.file(path, blob);
+          ok++;
+        } catch (e) { console.error("download fail", f, e); fail++; }
+      }
+      if (ok === 0) { alert(t.requests?.downloadAllFailed || "No se pudo descargar ningún archivo."); return; }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = safe(title || "solicitud") + ".zip";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (fail > 0) alert((t.requests?.downloadAllPartial || "Descargado ZIP con {ok} archivo(s); {fail} no se pudieron descargar.").replace("{ok}", ok).replace("{fail}", fail));
+    } finally { setDownloadingAll(false); }
+  };
   const sendFileToDocs = async (f, itemTitle) => {
     if (promoting) return;
     let key = f.key || null;
@@ -261,6 +310,13 @@ function RequestEditor({ state, setState, t, lang, log, request, onSave, onCance
           <div className="page-sub">{t.requests?.editSubtitle || "Configura los documentos a solicitar y genera un enlace para enviar."}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {totalFiles > 0 && (
+            <button className="btn" onClick={downloadAll} disabled={downloadingAll} title={t.requests?.downloadAllHint || "Descarga todos los archivos subidos en un ZIP"}>
+              {downloadingAll
+                ? (t.requests?.downloadingAll || "Preparando ZIP…")
+                : `⬇ ${(t.requests?.downloadAll || "Descargar todo")} (${totalFiles})`}
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={onCancel}>{t.common.cancel}</button>
           <button className="btn btn-primary" onClick={save} disabled={submittedReadonly}><Icon.check /> {t.common.save}</button>
         </div>
