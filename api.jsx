@@ -7,6 +7,14 @@
   const cfg = window.DOCUHOTEL_CONFIG || {};
   const offline = !!cfg.offlineMode || !cfg.supabaseUrl || !cfg.supabaseAnonKey || !window.supabase;
 
+  // No-op lock: supabase-js v2 uses navigator.locks to serialize auth ops
+  // across tabs. We have observed it staying held indefinitely — symptoms
+  // include `auth.getSession()` hanging for 60s on tabs that should have
+  // had the session ready locally. With autoRefreshToken disabled (below)
+  // the cross-tab serialization is unnecessary; let every call resolve
+  // immediately against the cached session.
+  const noOpLock = async (_name, _acquireTimeout, fn) => fn();
+
   const client = offline
     ? null
     : window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
@@ -20,7 +28,12 @@
         // Trade-off: access tokens are valid 1h; after that, queries will
         // return 401 and the app will route the user to login. We refresh
         // manually below on a long interval, far from the critical path.
-        auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false },
+        auth: {
+          persistSession: true,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          lock: noOpLock,
+        },
       });
 
   // Background, non-blocking refresh: every 50 minutes try to extend the
