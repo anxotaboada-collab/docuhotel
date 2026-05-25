@@ -35,19 +35,11 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
     }} />;
   }
 
-  const docs = (project.docIds || []).map(id => state.documents.find(d => d.id === id)).filter(Boolean);
-  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB") : "—";
+  const docIdSet = new Set(project.docIds || []);
+  const docs = (state.documents || []).filter(d => docIdSet.has(d.id));
   const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB") : "—";
   const expiresIso = project.shareExpiresAt;
   const daysLeft = Math.max(0, Math.floor((new Date(expiresIso) - new Date()) / 86400000));
-
-  // group by category
-  const byCat = {};
-  docs.forEach(d => {
-    const cat = state.categories.find(c => c.id === d.categoryId);
-    const key = cat?.name || "—";
-    (byCat[key] = byCat[key] || []).push(d);
-  });
 
   const handleOpen = (d) => {
     setOpenDoc(d);
@@ -57,11 +49,18 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
     logAudit("audit_download", `${project.name} · ${auditorName} · ${d.title}`);
   };
 
+  // Reuse DocumentsPage with a scoped state that only contains the docs the
+  // auditor is allowed to see, and a `can()` that blocks every mutating
+  // action. The result is the exact same layout and filters as the main
+  // documents list — but read-only and limited to this project.
   const auditState = {
     ...state,
+    documents: docs,
     config: { ...state.config, currentUserId: `audit:${auditorName}` },
     users: [...state.users, { id: `audit:${auditorName}`, name: auditorName, email: `auditor@externo`, role: "auditor" }],
   };
+  const auditViewerUser = { id: `audit:${auditorName}`, departments: ["*"] };
+  const auditCan = (p) => p === "allDepts"; // read access to everything; no create/edit/delete
 
   return (
     <div className="app audit-view" data-audit="true">
@@ -113,57 +112,27 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
         </div>
 
         {/* Project header */}
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 18 }}>
           <h1 className="page-title">{project.name}</h1>
           {project.notes && (
             <div style={{ marginTop: 10, padding: 14, background: 'var(--bg-soft)', borderLeft: '3px solid var(--ink)', borderRadius: 4, fontSize: 13.5, color: 'var(--ink)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
               {project.notes}
             </div>
           )}
-          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
-            {docs.length} {t.projects?.docCount || "documentos"}
-          </div>
         </div>
 
-        {/* Docs grouped by category */}
-        {Object.entries(byCat).map(([catName, list]) => (
-          <div key={catName} style={{ marginBottom: 24 }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', fontWeight: 600 }}>{catName}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-              {list.map(d => {
-                const st = state.statuses.find(s => s.id === d.statusId);
-                const depts = d.departments.includes("*")
-                  ? [t.documents.allDepartments]
-                  : d.departments.map(id => state.departments.find(x => x.id === id)?.name).filter(Boolean);
-                return (
-                  <button key={d.id} onClick={() => handleOpen(d)} style={{
-                    textAlign: 'left',
-                    padding: 16,
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    background: 'var(--bg)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8,
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
-                  }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.boxShadow = 'none'; }}
-                  >
-                    <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>{d.title}</div>
-                    {d.description && <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>{d.description}</div>}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
-                      <StatusPill status={st} t={t} />
-                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>v{d.version} · {fmtDate(d.startDate)} → {fmtDate(d.expiryDate)}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{depts.join(", ")}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        {/* Same documents list (with filters) as the authenticated app, but
+            limited to the project's docs and with create/edit/delete hidden. */}
+        <DocumentsPage
+          state={auditState}
+          setState={setState}
+          t={t} lang={lang}
+          openViewer={handleOpen}
+          log={() => {}}
+          density="comfortable"
+          can={auditCan}
+          viewerUser={auditViewerUser}
+        />
 
         <footer style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid var(--line)', color: 'var(--muted)', fontSize: 11.5, textAlign: 'center' }}>
           {t.audit?.footerAuditor || "Auditor"}: <strong>{auditorName}</strong> · {t.audit?.allActionsLogged || "Todas las acciones quedan registradas"} · Docuhotel
