@@ -15,8 +15,13 @@ function App() {
   const [bootStatus, setBootStatus] = useState(
     useBackend && !isPublicRoute ? "loading" : "ready"
   );
+  // In backend mode (public OR authenticated), start with no state so the
+  // loading guard renders a spinner until the route's bootstrap completes.
+  // Otherwise the route matcher below sees stale localStorage state (wrong
+  // publicToken, missing project) and flashes "Enlace no válido / caducado"
+  // for ~1s before the real data arrives.
   const [state, setStateRaw] = useState(() =>
-    (useBackend && !isPublicRoute) ? null : window.DocuStore.loadState()
+    useBackend ? null : window.DocuStore.loadState()
   );
   const [tab, setTab] = useState("documents");
   const [viewerDoc, setViewerDoc] = useState(null);
@@ -80,9 +85,14 @@ function App() {
         }
       } catch (e) {
         console.error("public bootstrap", e);
+        // Surface a usable state so the loading guard doesn't hang. The
+        // route matcher then renders the appropriate "no válido" message
+        // because the token won't be found.
+        if (!cancelled) setStateRaw(window.DocuStore.defaultState());
       }
     };
     bootPublic();
+    return () => { cancelled = true; };
   }, [useBackend, isPublicRoute, route]);
 
   // Backend bootstrap: load state once authenticated, or show login.

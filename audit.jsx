@@ -49,18 +49,14 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
     logAudit("audit_download", `${project.name} · ${auditorName} · ${d.title}`);
   };
 
-  // Reuse DocumentsPage with a scoped state that only contains the docs the
-  // auditor is allowed to see, and a `can()` that blocks every mutating
-  // action. The result is the exact same layout and filters as the main
-  // documents list — but read-only and limited to this project.
+  // Scoped state for the viewer: only the project's docs + an "auditor" user
+  // whose name flows into the watermark and the audit log entries.
   const auditState = {
     ...state,
     documents: docs,
     config: { ...state.config, currentUserId: `audit:${auditorName}` },
     users: [...state.users, { id: `audit:${auditorName}`, name: auditorName, email: `auditor@externo`, role: "auditor" }],
   };
-  const auditViewerUser = { id: `audit:${auditorName}`, departments: ["*"] };
-  const auditCan = (p) => p === "allDepts"; // read access to everything; no create/edit/delete
 
   return (
     <div className="app audit-view" data-audit="true">
@@ -84,30 +80,20 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
 
       <main className="main">
         {/* Banner */}
-        <div style={{
-          padding: '20px 24px',
-          background: 'var(--warn-bg)',
-          color: 'var(--warn)',
-          borderRadius: 12,
-          marginBottom: 24,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ fontSize: 28 }}>📋</div>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+        <div className="audit-banner">
+          <div className="audit-banner-icon">📋</div>
+          <div className="audit-banner-text">
+            <div className="audit-banner-title">
               {t.audit?.banner || "Vista de auditor"} — {auditorName}
             </div>
-            <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--ink)' }}>
+            <div className="audit-banner-help">
               {t.audit?.bannerHelp2 || "Acceso temporal. Puedes consultar y descargar copias con tu nombre como marca de agua. Cada acción queda registrada."}
             </div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink)', opacity: 0.7 }}>{t.audit?.expiresIn || "Caduca en"}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)' }}>{daysLeft} {t.audit?.days || "días"}</div>
-            <div style={{ fontSize: 11, color: 'var(--ink)', opacity: 0.7 }}>{fmtDateTime(expiresIso)}</div>
+          <div className="audit-banner-expiry">
+            <div className="audit-banner-expiry-label">{t.audit?.expiresIn || "Caduca en"}</div>
+            <div className="audit-banner-expiry-days">{daysLeft} {t.audit?.days || "días"}</div>
+            <div className="audit-banner-expiry-date">{fmtDateTime(expiresIso)}</div>
           </div>
         </div>
 
@@ -121,18 +107,11 @@ function AuditView({ project, state, setState, t, lang, setLang }) {
           )}
         </div>
 
-        {/* Same documents list (with filters) as the authenticated app, but
-            limited to the project's docs and with create/edit/delete hidden. */}
-        <DocumentsPage
-          state={auditState}
-          setState={setState}
-          t={t} lang={lang}
-          openViewer={handleOpen}
-          log={() => {}}
-          density="comfortable"
-          can={auditCan}
-          viewerUser={auditViewerUser}
-        />
+        {/* Mobile-friendly read-only document list for the auditor. The main
+            DocumentsPage is a wide table — on phones the action column (with
+            the "Ver" eye) clips off the screen. AuditDocList renders cards
+            with a prominent open button that works on both desktop and mobile. */}
+        <AuditDocList state={auditState} t={t} lang={lang} onOpen={handleOpen} />
 
         <footer style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid var(--line)', color: 'var(--muted)', fontSize: 11.5, textAlign: 'center' }}>
           {t.audit?.footerAuditor || "Auditor"}: <strong>{auditorName}</strong> · {t.audit?.allActionsLogged || "Todas las acciones quedan registradas"} · Docuhotel
@@ -215,4 +194,93 @@ function AuditNameGate({ project, t, onConfirm }) {
   );
 }
 
+function AuditDocList({ state, t, lang, onOpen }) {
+  const [search, setSearch] = React.useState("");
+  const [filterCategory, setFilterCategory] = React.useState("");
+  const [filterStatus, setFilterStatus] = React.useState("");
+
+  const statusById = Object.fromEntries(state.statuses.map(s => [s.id, s]));
+  const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
+  const depById = Object.fromEntries(state.departments.map(d => [d.id, d]));
+
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" }) : "—";
+  const fmtSize = (b) => b == null ? "" : b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(0)} KB` : `${(b/1024/1024).toFixed(1)} MB`;
+
+  const filtered = (state.documents || []).filter(d => {
+    if (filterCategory && d.categoryId !== filterCategory) return false;
+    if (filterStatus && d.statusId !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!(d.title.toLowerCase().includes(q) || (d.description || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div>
+      <div className="audit-list-filters">
+        <div className="search-input" style={{ flex: 1, minWidth: 200 }}>
+          <Icon.search />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={`${t.common.search}...`} />
+        </div>
+        <select className="select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+          <option value="">{t.common.category}: {t.common.all}</option>
+          {state.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select className="select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">{t.common.status}: {t.common.all}</option>
+          {state.statuses.map(s => <option key={s.id} value={s.id}>{(t.statuses && t.statuses[s.key]) || s.label?.[lang] || s.key}</option>)}
+        </select>
+      </div>
+      <div className="audit-list-meta">{filtered.length} · {t.common.total.toLowerCase()}</div>
+      {filtered.length === 0 ? (
+        <div className="empty-state">{t.common.empty}</div>
+      ) : (
+        <div className="audit-doc-list">
+          {filtered.map(d => {
+            const st = statusById[d.statusId];
+            const cat = catById[d.categoryId];
+            const depts = d.departments?.includes("*")
+              ? [t.documents.allDepartments]
+              : (d.departments || []).map(id => depById[id]?.name).filter(Boolean);
+            return (
+              <div key={d.id} className="audit-doc-card" onClick={() => onOpen(d)}>
+                <div className="audit-doc-info">
+                  <div className="audit-doc-title">
+                    <Icon.doc style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="audit-doc-name">{d.title}</div>
+                      <div className="audit-doc-meta">
+                        {(cat?.name ? cat.name + " · " : "")}v{d.version}
+                        {d.file?.name ? ` · ${d.file.name}` : ""}
+                        {d.file?.size ? ` · ${fmtSize(d.file.size)}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="audit-doc-tags">
+                    <StatusPill status={st} t={t} />
+                    {depts.slice(0, 3).map((name, i) => <span key={i} className="chip">{name}</span>)}
+                    {depts.length > 3 && <span className="chip muted">+{depts.length - 3}</span>}
+                  </div>
+                  <div className="audit-doc-expiry">
+                    <span style={{ color: 'var(--muted)' }}>{t.documents.table.expiry}:</span> {fmtDate(d.expiryDate)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary audit-doc-view"
+                  onClick={(e) => { e.stopPropagation(); onOpen(d); }}
+                >
+                  <Icon.eye /> {t.common.view || "Ver"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 window.AuditView = AuditView;
+window.AuditDocList = AuditDocList;
