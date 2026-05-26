@@ -1,6 +1,0 @@
-2026-05-17T21:40:00Z
-
-Vercel auto-deploy from main has been stuck since PR #13; PRs #14, #15
-and #16 merged into main but no production deployment fired. This file
-exists to force Vercel to redeploy the current main. Safe to delete or
-overwrite later.
