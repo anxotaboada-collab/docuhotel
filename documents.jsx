@@ -211,7 +211,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
                     </div>
                   </td>
                   <td>
-                    <span className="expiry" style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>
+                    <span className="expiry">
                       {d.startDate ? new Date(d.startDate).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" }) : "—"}
                     </span>
                   </td>
