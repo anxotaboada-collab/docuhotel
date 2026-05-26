@@ -13,7 +13,8 @@
 
 import { transform } from "esbuild";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, watch } from "node:fs";
+import { readFileSync, writeFileSync, watch, mkdirSync, copyFileSync, cpSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // Order matters: each file relies on globals defined by earlier ones, and
 // app.jsx (last) calls ReactDOM.createRoot(...).render(...).
@@ -40,6 +41,15 @@ const OUT = "docuhotel.bundle.js";
 const HTML = "index.html";
 const BUNDLE_HREF_RE = /docuhotel\.bundle\.js(?:\?v=[a-f0-9]+)?/g;
 
+// Vercel serves only the contents of DIST. Everything else in the repo
+// (source .jsx, supabase/*.sql, *.md, build.mjs, package.json) stays out
+// of the public URL so attackers can't enumerate the backend by curling
+// /api.jsx or /supabase/schema.sql. dist/ is rebuilt from scratch on
+// every build, so anything we forget to copy here is simply not shipped.
+const DIST = "dist";
+const STATIC_FILES = ["styles.css", "config.js"];
+const STATIC_DIRS = ["vendor"];
+
 async function buildOnce() {
   // `;` between files so an expression at the end of one file can't merge with
   // the start of the next (api.jsx etc. start with `(function () { ... })()`).
@@ -61,7 +71,17 @@ async function buildOnce() {
   const next = html.replace(BUNDLE_HREF_RE, `docuhotel.bundle.js?v=${hash}`);
   if (next !== html) writeFileSync(HTML, next);
 
-  console.log(`Built ${OUT} — ${(code.length / 1024).toFixed(1)} KB — v=${hash}`);
+  // Stage the minimal set of files Vercel will serve. Rebuild dist/ from
+  // scratch so removing a file from STATIC_FILES/STATIC_DIRS actually drops
+  // it from production on the next deploy.
+  if (existsSync(DIST)) rmSync(DIST, { recursive: true, force: true });
+  mkdirSync(DIST, { recursive: true });
+  writeFileSync(join(DIST, OUT), bundle);
+  writeFileSync(join(DIST, HTML), next);
+  for (const f of STATIC_FILES) copyFileSync(f, join(DIST, f));
+  for (const d of STATIC_DIRS) cpSync(d, join(DIST, d), { recursive: true });
+
+  console.log(`Built ${OUT} — ${(code.length / 1024).toFixed(1)} KB — v=${hash} (also staged in ${DIST}/)`);
 }
 
 await buildOnce();
