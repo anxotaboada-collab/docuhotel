@@ -141,6 +141,8 @@ button { font: inherit; color: inherit; }
 @media (max-width: 760px) {
   .topbar { gap: 8px; padding: 0 12px; }
   .qr-public-btn-text { display: none; }
+  .main { padding: 16px 14px 60px; }
+  .page-title { font-size: 22px; }
   /* Full-screen modals on phones so the PDF viewer isn't cramped */
   .modal-overlay { padding: 0; }
   .modal, .modal.size-md, .modal.size-lg, .modal.size-xl {
@@ -808,6 +810,99 @@ button { font: inherit; color: inherit; }
   .public-doc-card { flex-direction: column; align-items: stretch; }
   .public-doc-view { width: 100%; justify-content: center; }
 }
+
+/* === Auditor view (QR/share link → /audit/<token>) === */
+.audit-banner {
+  padding: 18px 20px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-radius: 12px;
+  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 16px;
+  align-items: center;
+}
+.audit-banner-icon { font-size: 28px; align-self: start; }
+.audit-banner-text { min-width: 0; }
+.audit-banner-title {
+  font-size: 13px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.audit-banner-help { font-size: 13px; line-height: 1.5; color: var(--ink); }
+.audit-banner-expiry { text-align: right; }
+.audit-banner-expiry-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink); opacity: 0.7; }
+.audit-banner-expiry-days { font-size: 22px; font-weight: 700; color: var(--ink); }
+.audit-banner-expiry-date { font-size: 11px; color: var(--ink); opacity: 0.7; }
+
+.audit-list-filters {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.audit-list-meta { font-size: 12.5px; color: var(--muted); margin: 0 0 10px 4px; }
+.audit-doc-list { display: flex; flex-direction: column; gap: 10px; }
+.audit-doc-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+}
+.audit-doc-card:hover { border-color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.audit-doc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.audit-doc-title { display: flex; gap: 10px; align-items: flex-start; }
+.audit-doc-name { font-weight: 600; font-size: 14.5px; line-height: 1.3; word-break: break-word; }
+.audit-doc-meta { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; word-break: break-word; }
+.audit-doc-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.audit-doc-expiry { font-size: 12.5px; color: var(--ink); }
+.audit-doc-view {
+  flex-shrink: 0; min-width: 96px;
+  align-self: center;
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .audit-banner {
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "icon text" "expiry expiry";
+    padding: 14px 14px;
+  }
+  .audit-banner-icon { grid-area: icon; font-size: 22px; }
+  .audit-banner-text { grid-area: text; }
+  .audit-banner-expiry {
+    grid-area: expiry;
+    display: flex; align-items: baseline; gap: 8px;
+    text-align: left;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(0,0,0,.08);
+  }
+  .audit-banner-expiry-days { font-size: 16px; }
+  .audit-banner-expiry-date { margin-left: auto; }
+
+  .audit-list-filters { padding: 8px; gap: 8px; }
+  .audit-list-filters .select { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .audit-doc-card { flex-direction: column; align-items: stretch; padding: 14px; }
+  .audit-doc-view {
+    width: 100%;
+    min-width: 0;
+    padding: 12px;
+    font-size: 14.5px;
+  }
+}
+
+/* The watermark in the viewer is intentionally faint, but on white PDF
+   backgrounds rgba(0,0,0,.06) is essentially invisible. Bump the contrast
+   in audit mode so the auditor can clearly see their name overlaid on
+   every page they consult. */
+.audit-view .wm-diagonal { color: rgba(0,0,0,.13); }
+[data-theme="dark"] .audit-view .wm-diagonal { color: rgba(255,255,255,.14); }
 
 /* === Log === */
 .log-table .ts { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
