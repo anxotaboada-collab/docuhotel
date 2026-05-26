@@ -470,7 +470,19 @@
     const { data, error } = await client.rpc("audit_project", { p_token: token });
     if (error || !data?.length) return null;
     const row = data[0];
-    return { project: row.project, docs: (row.docs || []).map(docFromRow) };
+    // Return RAW snake_case rows; the caller (bootPublic) is responsible
+    // for running them through projFromRow / docFromRow. Mapping here AND
+    // there was a double-map: the second pass tried to read `r.file_key`
+    // on an already-mapped row, ended up with doc.file.key === undefined,
+    // and the viewer therefore fell back to the placeholder "muster" PDF.
+    return {
+      project: row.project,
+      docs: row.docs || [],
+      categories: row.categories || [],
+      statuses: row.statuses || [],
+      departments: row.departments || [],
+      responsibles: row.responsibles || [],
+    };
   }
 
   async function requestByToken(token) {

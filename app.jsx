@@ -53,15 +53,25 @@ function App() {
             // The RPC returns rows in snake_case (and strips share_token).
             // Map them with the same helpers the authenticated path uses so
             // the audit view sees camelCase fields (shareExpiresAt, fileKey,
-            // categoryId, etc.) — otherwise the expiry check fails and the
-            // "Enlace caducado" screen is shown even for a valid link.
+            // categoryId, etc.).
             const docs = (res.docs || []).map(window.DocuApi.docFromRow);
             const proj = {
               ...window.DocuApi.projFromRow(res.project),
               shareToken: m2[1],
               docIds: docs.map(d => d.id),
             };
-            setStateRaw({ ...def, documents: docs, projects: [proj] });
+            // Taxonomies from the RPC. Without these the documents table
+            // shows empty cells because category/status/department/responsible
+            // IDs do not resolve to any name in the default state.
+            setStateRaw({
+              ...def,
+              documents: docs,
+              projects: [proj],
+              categories: res.categories || [],
+              statuses: res.statuses || [],
+              departments: res.departments || [],
+              responsibles: res.responsibles || [],
+            });
           }
         } else if (m3) {
           const req = await window.DocuApi.requestByToken(m3[1]);
