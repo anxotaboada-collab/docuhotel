@@ -64,9 +64,22 @@
     linkedDocIds: r.linked_doc_ids || [],
     uploadedBy: r.uploaded_by,
     uploadedAt: r.uploaded_at,
+    defaultLang: r.default_lang || "es",
+    // Per-language file variants — populated by the loader once it joins
+    // document_files. Keyed by language code ('es','en','de','pt').
+    files: {},
     file: r.file_key
       ? { name: r.file_name, size: Number(r.file_size || 0), mime: r.file_mime, key: r.file_key, dataUrl: null }
       : { name: r.file_name || "documento.pdf", size: Number(r.file_size || 0), dataUrl: null },
+  });
+
+  const docFileFromRow = (r) => ({
+    lang: r.lang,
+    key: r.file_key,
+    name: r.file_name || null,
+    size: Number(r.file_size || 0),
+    mime: r.file_mime || null,
+    uploadedAt: r.uploaded_at || null,
   });
 
   const docToRow = (d, hotelId) => ({
@@ -88,6 +101,7 @@
     file_name: d.file?.name || null,
     file_size: d.file?.size || null,
     file_mime: d.file?.mime || null,
+    default_lang: d.defaultLang || "es",
     uploaded_by: d.uploadedBy || null,
     uploaded_at: d.uploadedAt || new Date().toISOString(),
   });
@@ -244,11 +258,18 @@
     const items = itemsRes.data || [];
     const logs = logsRes.data || [];
 
-    // Third wave — request uploads (needs item ids).
+    // Third wave — request uploads (needs item ids) + per-language document files.
     const itemIds = items.map((i) => i.id);
-    const { data: uploads } = itemIds.length
-      ? await client.from("request_uploads").select("*").in("request_item_id", itemIds)
-      : { data: [] };
+    const allDocIds = docRows.map((d) => d.id);
+    const [{ data: uploads }, { data: docFiles }] = await Promise.all([
+      itemIds.length ? client.from("request_uploads").select("*").in("request_item_id", itemIds) : Promise.resolve({ data: [] }),
+      allDocIds.length ? client.from("document_files").select("*").in("document_id", allDocIds) : Promise.resolve({ data: [] }),
+    ]);
+    const filesByDoc = {};
+    for (const r of (docFiles || [])) {
+      const m = (filesByDoc[r.document_id] = filesByDoc[r.document_id] || {});
+      m[r.lang] = docFileFromRow(r);
+    }
     const requests = reqRows.map((r) =>
       reqFromRow(
         r,
@@ -269,7 +290,11 @@
       periods:     byTable.periods.map((p) => ({ id: p.id, months: p.months, manual: !!p.manual, label: p.label })),
       responsibles:byTable.responsibles.map((r) => ({ id: r.id, name: r.name, email: r.email })),
       users:       byTable.app_users.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, departments: u.departments || [] })),
-      documents:   docRows.map((d) => ({ ...docFromRow(d), sharedHotelIds: sharedByDoc[d.id] || [] })),
+      documents:   docRows.map((d) => ({
+        ...docFromRow(d),
+        files: filesByDoc[d.id] || {},
+        sharedHotelIds: sharedByDoc[d.id] || [],
+      })),
       projects:    byTable.projects.map(projFromRow),
       requests,
       log:         byTable.activity_log
@@ -410,6 +435,62 @@
     });
     if (error) throw error;
     return { key, name: file.name, size: file.size, mime: file.type };
+  }
+
+  // Upload (or replace) the language variant of a document. Each variant is a
+  // separate object in storage and its own row in document_files.
+  async function uploadDocLanguageFile(hotelId, docId, lang, file) {
+    if (offline) return null;
+    if (!["es","en","de","pt"].includes(lang)) throw new Error("Idioma no soportado: " + lang);
+    const safe = file.name.replace(/[^\w.\-]+/g, "_");
+    const key = `docs/${hotelId}/${docId}/${lang}/${Date.now()}_${safe}`;
+    const up = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
+      cacheControl: "3600", upsert: false, contentType: file.type || "application/pdf",
+    });
+    if (up.error) throw up.error;
+    const { data: { user } = {} } = await client.auth.getUser();
+    const row = {
+      document_id: docId, lang, file_key: key,
+      file_name: file.name, file_size: file.size, file_mime: file.type || null,
+      uploaded_by: user?.id || null, uploaded_at: new Date().toISOString(),
+    };
+    const { error } = await client.from("document_files").upsert(row, { onConflict: "document_id,lang" });
+    if (error) throw error;
+    return { lang, key, name: file.name, size: file.size, mime: file.type };
+  }
+
+  async function deleteDocLanguageFile(docId, lang) {
+    if (offline) return;
+    const { data: existing } = await client.from("document_files").select("file_key").eq("document_id", docId).eq("lang", lang).maybeSingle();
+    if (existing?.file_key) {
+      try { await client.storage.from(cfg.storageBucket || "docuhotel").remove([existing.file_key]); }
+      catch (e) { console.warn("deleteDocLanguageFile storage:", e?.message || e); }
+    }
+    const { error } = await client.from("document_files").delete().eq("document_id", docId).eq("lang", lang);
+    if (error) throw error;
+  }
+
+  // List every document the current user can see across all accessible hotels,
+  // enriched with the hotels each one is active in and the languages uploaded.
+  // Used by the regional mirror view.
+  async function listAllDocumentsForUser() {
+    if (offline) return [];
+    const { data, error } = await client.rpc("list_all_documents_for_user");
+    if (error) { console.error("listAllDocumentsForUser", error); return []; }
+    return (data || []).map((r) => ({
+      id: r.id, hotelId: r.hotel_id,
+      title: r.title, description: r.description || "",
+      categoryId: r.category_id, statusId: r.status_id, periodId: r.period_id,
+      departments: r.departments || [],
+      startDate: r.start_date, expiryDate: r.expiry_date,
+      version: r.version, publicAccess: !!r.public_access,
+      fileName: r.file_name, fileKey: r.file_key, fileSize: Number(r.file_size || 0),
+      defaultLang: r.default_lang || "es",
+      uploadedAt: r.uploaded_at,
+      langs: r.langs || [],
+      hotelIds: r.hotel_ids || [],
+      hotelNames: r.hotel_names || [],
+    }));
   }
 
   // Server-side copy of an existing object into the hotel's docs/ tree, so a
@@ -685,10 +766,11 @@
     client,
     getSession, getMe,
     loadFullState, saveDiff,
-    uploadDocFile, uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
+    uploadDocFile, uploadDocLanguageFile, deleteDocLanguageFile,
+    uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
-    createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads,
+    createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
     // Exposed so the public-route bootstrap (audit_project RPC, etc.) can

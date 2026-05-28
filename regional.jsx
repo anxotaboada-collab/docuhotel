@@ -18,13 +18,259 @@ function RegionalPanel({ state, t, lang, switchHotel, pushToast }) {
       <div className="admin-nav" style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
         <button className={`btn btn-sm ${section === "newhotel" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("newhotel")}>🏨 Nuevo hotel</button>
         <button className={`btn btn-sm ${section === "upload" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("upload")}>Subir documento regional</button>
+        <button className={`btn btn-sm ${section === "documents" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("documents")}>📋 Todos los documentos</button>
         <button className={`btn btn-sm ${section === "registry" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("registry")}>Registro de subidas</button>
         <button className={`btn btn-sm ${section === "users" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("users")}>Usuarios y hoteles</button>
       </div>
       {section === "newhotel" && <RegionalNewHotel switchHotel={switchHotel} pushToast={pushToast} />}
       {section === "upload" && <RegionalUpload state={state} hotels={hotels} pushToast={pushToast} onDone={() => setSection("registry")} />}
+      {section === "documents" && <RegionalAllDocuments state={state} hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} pushToast={pushToast} />}
       {section === "registry" && <RegionalRegistry hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} />}
       {section === "users" && <RegionalUsers hotels={hotels} hotelName={hotelName} pushToast={pushToast} />}
+    </div>
+  );
+}
+
+// ── Mirror of every document across every hotel, with filters ─────────
+function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pushToast }) {
+  const [rows, setRows] = React.useState(null);
+  const [search, setSearch] = React.useState("");
+  const [filterHotel, setFilterHotel] = React.useState("");
+  const [filterCategory, setFilterCategory] = React.useState("");
+  const [filterStatus, setFilterStatus] = React.useState("");
+  const [filterLang, setFilterLang] = React.useState("");
+  const [filterExpiry, setFilterExpiry] = React.useState(""); // "" | "expiring30" | "expired" | "ok"
+  const [filterPublic, setFilterPublic] = React.useState(""); // "" | "yes" | "no"
+  const [filterShared, setFilterShared] = React.useState(""); // "" | "single" | "multi"
+
+  const reload = React.useCallback(() => {
+    setRows(null);
+    window.DocuApi.listAllDocumentsForUser()
+      .then(setRows)
+      .catch((e) => { console.error(e); pushToast && pushToast("⚠ No se pudo cargar la lista"); setRows([]); });
+  }, [pushToast]);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  // Build category + status maps. Because each hotel has its own per-hotel taxonomy
+  // rows, we collapse by name — a doc's category_id "cat_oca_xxxx" displays as "OCA"
+  // regardless of which hotel it came from.
+  const catNames = React.useMemo(() => {
+    const m = {};
+    for (const c of state.categories || []) m[c.id] = c.name;
+    return m;
+  }, [state.categories]);
+  const statusByName = React.useMemo(() => {
+    const m = {};
+    for (const s of state.statuses || []) m[s.id] = s;
+    return m;
+  }, [state.statuses]);
+
+  const allCategoryNames = React.useMemo(() => {
+    const set = new Set();
+    for (const r of rows || []) {
+      const n = catNames[r.categoryId];
+      if (n) set.add(n);
+    }
+    return Array.from(set).sort();
+  }, [rows, catNames]);
+  const allStatusKeys = ["active","draft","pending","archived"];
+
+  const daysUntil = (iso) => {
+    if (!iso) return null;
+    return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  };
+
+  const filtered = (rows || []).filter(r => {
+    if (search) {
+      const q = search.toLowerCase();
+      if (!(r.title.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q))) return false;
+    }
+    if (filterHotel && !(r.hotelIds || []).includes(filterHotel)) return false;
+    if (filterCategory) {
+      const n = catNames[r.categoryId] || "";
+      if (n !== filterCategory) return false;
+    }
+    if (filterStatus) {
+      const st = statusByName[r.statusId];
+      if (!st || st.key !== filterStatus) return false;
+    }
+    if (filterLang && !((r.langs || []).includes(filterLang))) return false;
+    if (filterPublic === "yes" && !r.publicAccess) return false;
+    if (filterPublic === "no" && r.publicAccess) return false;
+    if (filterShared === "single" && (r.hotelIds || []).length > 1) return false;
+    if (filterShared === "multi" && (r.hotelIds || []).length <= 1) return false;
+    if (filterExpiry) {
+      const d = daysUntil(r.expiryDate);
+      if (filterExpiry === "expired" && !(d != null && d < 0)) return false;
+      if (filterExpiry === "expiring30" && !(d != null && d >= 0 && d <= 30)) return false;
+      if (filterExpiry === "ok" && !(d != null && d > 30)) return false;
+    }
+    return true;
+  });
+
+  const reset = () => {
+    setSearch(""); setFilterHotel(""); setFilterCategory(""); setFilterStatus("");
+    setFilterLang(""); setFilterExpiry(""); setFilterPublic(""); setFilterShared("");
+  };
+
+  const fmt = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" }) : "—";
+
+  const downloadVariant = async (r, lc) => {
+    if (!window.DocuApi || window.DocuApi.offline) return;
+    let key = null, name = null;
+    if (lc === r.defaultLang && r.fileKey) {
+      key = r.fileKey; name = r.fileName;
+    } else {
+      // Need the explicit variant row from document_files.
+      try {
+        const { data, error } = window.DocuApi.client
+          ? await window.DocuApi.client.from("document_files").select("file_key,file_name").eq("document_id", r.id).eq("lang", lc).maybeSingle()
+          : { data: null, error: null };
+        if (error) throw error;
+        if (data) { key = data.file_key; name = data.file_name; }
+      } catch (e) { console.error(e); pushToast && pushToast("⚠ No se pudo cargar la versión"); return; }
+    }
+    if (!key) { pushToast && pushToast("⚠ Sin archivo en " + lc.toUpperCase()); return; }
+    const url = await window.DocuApi.signedUrl(key);
+    if (!url) { pushToast && pushToast("⚠ No se pudo firmar la URL"); return; }
+    const a = document.createElement("a");
+    a.href = url;
+    const langs = r.langs || [];
+    const suffix = langs.length > 1 ? lc.toUpperCase() : "";
+    a.download = (window.safeDocFilename ? window.safeDocFilename(r.title, suffix) : (r.title + (suffix ? `_${suffix}` : "") + ".pdf"));
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  if (rows === null) return <div className="empty-state">Cargando…</div>;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
+          Vista corporativa de TODOS los documentos. Una fila por documento, con los hoteles donde está activo y los idiomas disponibles.
+        </p>
+        <button className="btn btn-sm btn-ghost" onClick={reload}>↻ Actualizar</button>
+      </div>
+      <div className="filter-row" style={{ marginBottom: 10 }}>
+        <div className="search-input">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar título o descripción…" />
+        </div>
+        <select className="select" value={filterHotel} onChange={e => setFilterHotel(e.target.value)}>
+          <option value="">Hotel: todos</option>
+          {hotels.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+        </select>
+        <select className="select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+          <option value="">Categoría: todas</option>
+          {allCategoryNames.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <select className="select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">Estado: todos</option>
+          {allStatusKeys.map(k => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <select className="select" value={filterLang} onChange={e => setFilterLang(e.target.value)}>
+          <option value="">Idioma: cualquiera</option>
+          <option value="es">ES</option>
+          <option value="en">EN</option>
+          <option value="de">DE</option>
+          <option value="pt">PT</option>
+        </select>
+        <select className="select" value={filterExpiry} onChange={e => setFilterExpiry(e.target.value)}>
+          <option value="">Caducidad: todas</option>
+          <option value="expired">Caducados</option>
+          <option value="expiring30">Próx. 30 días</option>
+          <option value="ok">Vigentes &gt; 30 d</option>
+        </select>
+        <select className="select" value={filterPublic} onChange={e => setFilterPublic(e.target.value)}>
+          <option value="">Público: indif.</option>
+          <option value="yes">Solo públicos</option>
+          <option value="no">Solo internos</option>
+        </select>
+        <select className="select" value={filterShared} onChange={e => setFilterShared(e.target.value)}>
+          <option value="">Alcance: todos</option>
+          <option value="single">Un solo hotel</option>
+          <option value="multi">Varios hoteles</option>
+        </select>
+        <button className="btn btn-ghost" onClick={reset}>Limpiar</button>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>
+        {filtered.length} de {rows.length} documento(s)
+      </div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Documento</th>
+              <th>Categoría</th>
+              <th>Estado</th>
+              <th>Caducidad</th>
+              <th>Idiomas</th>
+              <th>Hoteles</th>
+              <th style={{ width: 90 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={7}><div className="empty-state">Sin resultados.</div></td></tr>}
+            {filtered.map(r => {
+              const st = statusByName[r.statusId];
+              const days = daysUntil(r.expiryDate);
+              const expClass = days == null ? "" : (days < 0 ? "warn" : days <= 30 ? "warn" : "");
+              return (
+                <tr key={r.id}>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <strong>{r.title}</strong>
+                          {r.publicAccess && <span className="pill outline" style={{ fontSize: 10, padding: '1px 6px' }}>◈ PÚBLICO</span>}
+                        </div>
+                        <div className="doc-meta">v{r.version} · {r.fileName || "—"}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{catNames[r.categoryId] || "—"}</td>
+                  <td>{st ? <span className="pill" style={{ background: st.bg, color: st.color }}>{(st.label && (st.label[lang] || st.label.es)) || st.key}</span> : "—"}</td>
+                  <td>
+                    <span style={{ color: expClass === "warn" ? "var(--warn)" : undefined }}>{fmt(r.expiryDate)}</span>
+                    {days != null && days < 0 && <div style={{ fontSize: 10, color: 'var(--danger, #b91c1c)' }}>Caducado hace {-days} d</div>}
+                    {days != null && days >= 0 && days <= 30 && <div style={{ fontSize: 10, color: 'var(--warn)' }}>en {days} d</div>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                      {(r.langs || []).map(lc => (
+                        <button
+                          key={lc}
+                          type="button"
+                          onClick={() => downloadVariant(r, lc)}
+                          title={`Descargar versión ${lc.toUpperCase()}`}
+                          style={{ fontSize: 10, padding: '2px 6px', border: '1px solid var(--line)', borderRadius: 4, background: 'var(--bg-soft)', cursor: 'pointer' }}
+                        >{lc.toUpperCase()}{lc === r.defaultLang ? '★' : ''}</button>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                      {(r.hotelIds || []).slice(0, 6).map(hid => (
+                        <button
+                          key={hid}
+                          type="button"
+                          onClick={() => switchHotel(hid)}
+                          title={`Entrar en ${hotelName(hid)}`}
+                          style={{ fontSize: 11, padding: '2px 6px', border: '1px solid var(--line)', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
+                        >🏨 {hotelName(hid)}</button>
+                      ))}
+                      {(r.hotelIds || []).length > 6 && (
+                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>+{r.hotelIds.length - 6}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn btn-sm btn-ghost" onClick={() => switchHotel(r.hotelIds?.[0] || r.hotelId)} title="Abrir en el hotel">→</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

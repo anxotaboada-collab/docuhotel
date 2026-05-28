@@ -771,3 +771,119 @@ drop policy if exists regional_uploads_select on regional_uploads;
 create policy regional_uploads_select on regional_uploads for select using (user_is_regional());
 drop policy if exists regional_uploads_regional_write on regional_uploads;
 create policy regional_uploads_regional_write on regional_uploads for all using (user_is_regional()) with check (user_is_regional());
+
+-- ───────────────────────────────────────────────────────────────────
+-- Multi-language file variants (es/en/de/pt)
+-- ───────────────────────────────────────────────────────────────────
+
+create table if not exists document_files (
+  document_id text not null references documents(id) on delete cascade,
+  lang        text not null check (lang in ('es','en','de','pt')),
+  file_key    text not null,
+  file_name   text,
+  file_size   bigint,
+  file_mime   text,
+  uploaded_by uuid references auth.users(id) on delete set null,
+  uploaded_at timestamptz not null default now(),
+  primary key (document_id, lang)
+);
+create index if not exists idx_document_files_doc on document_files(document_id);
+
+alter table documents add column if not exists default_lang text default 'es' check (default_lang in ('es','en','de','pt'));
+
+alter table document_files enable row level security;
+
+drop policy if exists document_files_select on document_files;
+create policy document_files_select on document_files for select using (
+  exists (select 1 from documents d where d.id = document_id and (
+    user_can_access(d.hotel_id) or exists (
+      select 1 from document_hotels dh where dh.document_id = d.id and user_can_access(dh.hotel_id)
+    )
+  ))
+);
+
+drop policy if exists document_files_write on document_files;
+create policy document_files_write on document_files for all using (
+  user_is_regional() or exists (
+    select 1 from documents d where d.id = document_id and (
+      (user_can_access(d.hotel_id) and current_user_role() in ('admin','dept_head'))
+      or exists (select 1 from document_hotels dh where dh.document_id = d.id and user_can_access(dh.hotel_id) and current_user_role() in ('admin','dept_head'))
+    )
+  )
+) with check (
+  user_is_regional() or exists (
+    select 1 from documents d where d.id = document_id and (
+      (user_can_access(d.hotel_id) and current_user_role() in ('admin','dept_head'))
+      or exists (select 1 from document_hotels dh where dh.document_id = d.id and user_can_access(dh.hotel_id) and current_user_role() in ('admin','dept_head'))
+    )
+  )
+);
+
+-- Regional mirror: list every document the current user can access, with the
+-- hotels each one is active in and the languages uploaded. Used by the
+-- Regional → All documents view.
+drop function if exists list_all_documents_for_user();
+create function list_all_documents_for_user() returns table (
+  id text,
+  hotel_id uuid,
+  title text,
+  description text,
+  category_id text,
+  status_id text,
+  period_id text,
+  departments text[],
+  start_date timestamptz,
+  expiry_date timestamptz,
+  version int,
+  public_access boolean,
+  file_name text,
+  file_key text,
+  file_size bigint,
+  default_lang text,
+  uploaded_at timestamptz,
+  langs text[],
+  hotel_ids uuid[],
+  hotel_names text[]
+)
+language sql stable security definer set search_path = public as $fn$
+  with accessible as (
+    select unnest(user_hotel_ids()) as hotel_id
+  ),
+  doc_set as (
+    select d.* from documents d where d.hotel_id in (select hotel_id from accessible)
+    union
+    select d.* from documents d
+    join document_hotels dh on dh.document_id = d.id
+    where dh.hotel_id in (select hotel_id from accessible)
+  )
+  select
+    d.id, d.hotel_id, d.title, d.description, d.category_id, d.status_id, d.period_id,
+    d.departments, d.start_date, d.expiry_date, d.version, d.public_access,
+    d.file_name, d.file_key, d.file_size, coalesce(d.default_lang, 'es') as default_lang, d.uploaded_at,
+    coalesce(
+      (select array_agg(distinct df.lang) from document_files df where df.document_id = d.id),
+      array[coalesce(d.default_lang, 'es')]
+    ) as langs,
+    (
+      select array_agg(distinct h)
+      from (
+        select d.hotel_id as h
+        union
+        select dh2.hotel_id from document_hotels dh2 where dh2.document_id = d.id
+      ) z
+    ) as hotel_ids,
+    (
+      select array_agg(h.name order by h.name)
+      from hotels h
+      where h.id = any (
+        select h2 from (
+          select d.hotel_id as h2
+          union
+          select dh3.hotel_id from document_hotels dh3 where dh3.document_id = d.id
+        ) z
+      )
+    ) as hotel_names
+  from doc_set d
+  order by d.title;
+$fn$;
+grant execute on function list_all_documents_for_user() to authenticated;

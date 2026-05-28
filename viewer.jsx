@@ -1,5 +1,45 @@
 // Docuhotel — Document viewer with watermarked download
 
+// Sanitise a document title into a filesystem-safe file name. Used so that the
+// PDF downloaded by the user always reflects the current title of the document
+// (if the title is edited later, the next download picks up the new name).
+function safeDocFilename(title, langSuffix) {
+  const base = String(title || "documento")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || "documento";
+  return base + (langSuffix ? `_${langSuffix}` : "") + ".pdf";
+}
+window.safeDocFilename = safeDocFilename;
+
+// Resolve the file pointer + display name for a given language. Falls back to
+// the document's "default" file (doc.file) when the requested language was not
+// uploaded.
+function pickDocFile(doc, wantLang) {
+  const variants = doc?.files || {};
+  if (wantLang && variants[wantLang]) return { ...variants[wantLang], lang: wantLang };
+  // Default language stored on doc.defaultLang, else "es"
+  const def = doc?.defaultLang || "es";
+  if (variants[def]) return { ...variants[def], lang: def };
+  const anyLang = Object.keys(variants)[0];
+  if (anyLang) return { ...variants[anyLang], lang: anyLang };
+  return doc?.file ? { ...doc.file, lang: def } : null;
+}
+window.pickDocFile = pickDocFile;
+
+// All language codes that have an uploaded PDF for this document.
+function availableLangs(doc) {
+  const v = doc?.files || {};
+  const langs = Object.keys(v).filter((l) => v[l]?.key || v[l]?.dataUrl);
+  if (langs.length) return langs;
+  if (doc?.file?.key || doc?.file?.dataUrl) return [doc?.defaultLang || "es"];
+  return [];
+}
+window.availableLangs = availableLangs;
+
 function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onOpenDoc, readOnly, auditMode }) {
   const cat = state.categories.find(c => c.id === doc.categoryId);
   const status = state.statuses.find(s => s.id === doc.statusId);
@@ -33,10 +73,18 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
 
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "long", day: "2-digit" }) : "—";
 
+  // Language variants. Always start with the document's default (ES unless the
+  // doc was uploaded in another language as its default).
+  const langs = availableLangs(doc);
+  const defaultLang = doc.defaultLang || (langs[0] || "es");
+  const [selectedLang, setSelectedLang] = React.useState(defaultLang);
+  React.useEffect(() => { setSelectedLang(defaultLang); }, [doc.id, defaultLang]);
+  const currentFile = pickDocFile(doc, selectedLang) || doc.file || null;
+
   // Real uploaded PDF (backend mode): resolve a short-lived signed URL and
   // render it with pdf.js (works on iOS/Android/desktop). Falls back to a
   // native <iframe> if pdf.js can't load or render.
-  const hasRealFile = !!(doc.file?.key && window.DocuApi && !window.DocuApi.offline);
+  const hasRealFile = !!(currentFile?.key && window.DocuApi && !window.DocuApi.offline);
   const [pdfUrl, setPdfUrl] = React.useState(null);
   const [pdfErr, setPdfErr] = React.useState("");
   const [pdfStatus, setPdfStatus] = React.useState("loading"); // loading | rendered | iframe | error
@@ -46,7 +94,7 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
     if (!hasRealFile) return;
     let cancelled = false;
     setPdfUrl(null); setPdfErr(""); setPdfStatus("loading");
-    window.DocuApi.signedUrl(doc.file.key, 1800)
+    window.DocuApi.signedUrl(currentFile.key, 1800)
       .then(u => {
         if (cancelled) return;
         if (u) setPdfUrl(u);
@@ -54,7 +102,7 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
       })
       .catch(e => { if (!cancelled) { setPdfErr(e?.message || "Error al cargar el PDF."); setPdfStatus("error"); } });
     return () => { cancelled = true; };
-  }, [hasRealFile, doc.file?.key]);
+  }, [hasRealFile, currentFile?.key]);
 
   React.useEffect(() => {
     if (!pdfUrl) return;
@@ -109,13 +157,18 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
   const handleDownload = async () => {
     onDownloaded(doc);
     // If a real PDF was uploaded, download that file instead of the placeholder.
-    if (doc.file?.key && window.DocuApi && !window.DocuApi.offline) {
+    // The downloaded file is named after the document's current title (so renaming
+    // the document automatically renames downloads), with the language suffix when
+    // the doc has more than one language variant.
+    const fileForDl = currentFile;
+    if (fileForDl?.key && window.DocuApi && !window.DocuApi.offline) {
       try {
-        const url = await window.DocuApi.signedUrl(doc.file.key);
+        const url = await window.DocuApi.signedUrl(fileForDl.key);
         if (url) {
           const a = document.createElement("a");
           a.href = url;
-          a.download = doc.file.name || (doc.title + ".pdf");
+          const suffix = langs.length > 1 ? (fileForDl.lang || selectedLang || "").toUpperCase() : "";
+          a.download = safeDocFilename(doc.title, suffix);
           document.body.appendChild(a); a.click(); a.remove();
           return;
         }
@@ -131,7 +184,7 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
     a.href = url;
     const safeAuditor = (user?.name || "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40);
     const suffix = auditMode && safeAuditor ? `_auditor-${safeAuditor}` : "_copia-privada";
-    a.download = (doc.file?.name?.replace(/\.pdf$/i, "") || doc.title) + suffix + ".html";
+    a.download = safeDocFilename(doc.title).replace(/\.pdf$/i, "") + suffix + ".html";
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
@@ -210,18 +263,44 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
           <div className="meta-row"><span className="label">{t.documents.startDate}</span><span className="value">{fmtDate(doc.startDate)}</span></div>
           <div className="meta-row"><span className="label">{t.documents.endDate}</span><span className="value">{fmtDate(doc.expiryDate)}</span></div>
           <div className="meta-row"><span className="label">{t.common.version}</span><span className="value">v{doc.version}</span></div>
-          <div className="meta-row"><span className="label">{t.common.file}</span><span className="value" style={{ wordBreak: 'break-all' }}>{doc.file?.name}</span></div>
-          {doc.file?.key && window.DocuApi && !window.DocuApi.offline && (
+          <div className="meta-row"><span className="label">{t.common.file}</span><span className="value" style={{ wordBreak: 'break-all' }}>{safeDocFilename(doc.title, langs.length > 1 ? (currentFile?.lang || selectedLang || "").toUpperCase() : "")}</span></div>
+          {langs.length > 0 && (
+            <div className="meta-row">
+              <span className="label">Idioma</span>
+              <span className="value">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {["es","en","de","pt"].map(l => {
+                    const has = langs.includes(l);
+                    const active = selectedLang === l;
+                    if (!has && langs.length > 0) return (
+                      <span key={l} title="No disponible en este idioma" style={{ fontSize: 11, padding: '2px 6px', border: '1px dashed var(--line)', borderRadius: 4, color: 'var(--muted)', opacity: 0.5 }}>{l.toUpperCase()}</span>
+                    );
+                    return (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => setSelectedLang(l)}
+                        style={{ fontSize: 11, padding: '2px 8px', border: '1px solid var(--line)', borderRadius: 4, background: active ? 'var(--bg-soft)' : 'transparent', color: active ? 'var(--ink)' : 'var(--muted)', fontWeight: active ? 600 : 400, cursor: 'pointer' }}
+                      >{l.toUpperCase()}</button>
+                    );
+                  })}
+                </div>
+              </span>
+            </div>
+          )}
+          {currentFile?.key && window.DocuApi && !window.DocuApi.offline && (
             <div className="meta-row">
               <span className="label">&nbsp;</span>
               <span className="value">
                 <button
                   className="btn btn-sm btn-ghost"
                   onClick={async () => {
-                    const url = await window.DocuApi.signedUrl(doc.file.key);
+                    const url = await window.DocuApi.signedUrl(currentFile.key);
                     if (!url) return;
                     const a = document.createElement("a");
-                    a.href = url; a.download = doc.file.name || "documento.pdf";
+                    a.href = url;
+                    const suffix = langs.length > 1 ? (currentFile.lang || selectedLang || "").toUpperCase() : "";
+                    a.download = safeDocFilename(doc.title, suffix);
                     document.body.appendChild(a); a.click(); document.body.removeChild(a);
                   }}
                 >⬇ Descargar PDF original</button>
