@@ -268,8 +268,17 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
   const [startDate, setStartDate] = React.useState(doc?.startDate?.slice(0,10) || new Date().toISOString().slice(0,10));
   const [manualExpiry, setManualExpiry] = React.useState(doc?.expiryDate?.slice(0,10) || "");
   const [file, setFile] = React.useState(doc?.file || initialFile || null);
+  // Language of the primary uploaded file (defaults to Spanish). Used as the
+  // canonical filename language suffix and as the "open by default" variant.
+  const [defaultLang, setDefaultLang] = React.useState(doc?.defaultLang || "es");
+  // Map of language -> File (raw browser File objects) that the user has
+  // attached for additional language variants. Keyed by code.
+  const [pendingLangFiles, setPendingLangFiles] = React.useState({});
+  // Already-uploaded language variants (existing keys we keep around).
+  const [existingLangs, setExistingLangs] = React.useState(() => doc?.files || {});
   const [error, setError] = React.useState("");
   const fileRef = React.useRef();
+  const langFileRefs = { es: React.useRef(), en: React.useRef(), de: React.useRef(), pt: React.useRef() };
 
   const period = state.periods.find(p => p.id === periodId);
   const isManual = period?.manual;
@@ -300,7 +309,8 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
     if (!title.trim()) { setError(t.common.required); return; }
     const docId = doc?.id || window.DocuStore.uid("doc");
     let fileMeta = file || { name: "documento.pdf", size: 0, dataUrl: null };
-    if (pendingFile && window.DocuApi && !window.DocuApi.offline && state.hotelId) {
+    const useBackend = window.DocuApi && !window.DocuApi.offline && state.hotelId;
+    if (pendingFile && useBackend) {
       setUploading(true);
       try {
         const up = await window.DocuApi.uploadDocFile(state.hotelId, docId, pendingFile);
@@ -312,6 +322,34 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       }
       setUploading(false);
     }
+
+    // Upload any newly-attached language variants. Each variant becomes its
+    // own row in document_files so the viewer can offer ES/EN/DE/PT buttons.
+    // Also keep the "primary" language variant (defaultLang) in sync with the
+    // doc's main file, so a doc that was uploaded in Spanish doubles as the ES
+    // variant without the user having to re-upload it.
+    const nextLangFiles = { ...existingLangs };
+    if (useBackend) {
+      // Register the primary file under defaultLang as well, so the viewer
+      // can render it as a variant.
+      if (fileMeta?.key && !nextLangFiles[defaultLang]) {
+        nextLangFiles[defaultLang] = { lang: defaultLang, key: fileMeta.key, name: fileMeta.name, size: fileMeta.size, mime: fileMeta.mime };
+      }
+      for (const [lc, f] of Object.entries(pendingLangFiles)) {
+        if (!f) continue;
+        setUploading(true);
+        try {
+          const up = await window.DocuApi.uploadDocLanguageFile(state.hotelId, docId, lc, f);
+          nextLangFiles[lc] = { lang: lc, key: up.key, name: up.name, size: up.size, mime: up.mime };
+        } catch (err) {
+          setUploading(false);
+          setError(`Error subiendo la versión ${lc.toUpperCase()}: ` + (err?.message || err));
+          return;
+        }
+      }
+      setUploading(false);
+    }
+
     const next = {
       id: docId,
       title: title.trim(),
@@ -326,6 +364,8 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       uploadedBy: doc?.uploadedBy || state.config.currentUserId,
       uploadedAt: doc?.uploadedAt || new Date().toISOString(),
       file: fileMeta,
+      files: nextLangFiles,
+      defaultLang,
       version: doc ? doc.version + (doc.title !== title ? 1 : 0) : 1,
       publicAccess,
     };
@@ -411,19 +451,92 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
             )}
           </div>
           <div className="field full">
-            <label>{t.common.file} (PDF, ≤ 5 MB)</label>
+            <label>{t.common.file} (PDF, ≤ 25 MB)</label>
             <div className="dropzone" onClick={() => fileRef.current?.click()}>
               {file ? (
                 <div>
                   <div className="file-name">{file.name}</div>
-                  <div className="help">{fmtSize(file.size)}</div>
+                  <div className="help">{fmtSize(file.size)} · idioma principal: {defaultLang.toUpperCase()}</div>
                 </div>
               ) : (
                 <div>{t.documents.pickFile}</div>
               )}
               <input ref={fileRef} type="file" accept="application/pdf" style={{ display: "none" }} onChange={e => onPickFile(e.target.files?.[0])} />
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, fontSize: 12, color: "var(--muted)" }}>
+              <span>Idioma del archivo principal:</span>
+              {["es","en","de","pt"].map(l => (
+                <button
+                  type="button"
+                  key={l}
+                  onClick={() => setDefaultLang(l)}
+                  style={{
+                    padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: defaultLang === l ? 600 : 400,
+                    border: '1px solid var(--line)',
+                    background: defaultLang === l ? 'var(--bg-soft)' : 'transparent',
+                    color: defaultLang === l ? 'var(--ink)' : 'var(--muted)',
+                  }}
+                >{l.toUpperCase()}</button>
+              ))}
+            </div>
             {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 6 }}>{error}</div>}
+          </div>
+          <div className="field full">
+            <label>Versiones en otros idiomas (opcional)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+              {["es","en","de","pt"].filter(l => l !== defaultLang).map(l => {
+                const existing = existingLangs[l];
+                const pending = pendingLangFiles[l];
+                return (
+                  <div key={l} style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 8, background: 'var(--bg-soft)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <strong style={{ fontSize: 12 }}>{l.toUpperCase()}</strong>
+                      {(existing || pending) ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          style={{ fontSize: 11 }}
+                          onClick={() => {
+                            if (existing && window.DocuApi && !window.DocuApi.offline && doc?.id) {
+                              if (!confirm(`¿Eliminar la versión ${l.toUpperCase()}?`)) return;
+                              window.DocuApi.deleteDocLanguageFile(doc.id, l).catch(err => alert("Error: " + (err?.message || err)));
+                            }
+                            setExistingLangs(m => { const n = { ...m }; delete n[l]; return n; });
+                            setPendingLangFiles(m => { const n = { ...m }; delete n[l]; return n; });
+                            if (langFileRefs[l]?.current) langFileRefs[l].current.value = "";
+                          }}
+                        >× Quitar</button>
+                      ) : null}
+                    </div>
+                    {existing ? (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        ✓ {existing.name || 'subido'} · {fmtSize(existing.size || 0)}
+                      </div>
+                    ) : pending ? (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        ⏳ {pending.name} · {fmtSize(pending.size)} (pendiente)
+                      </div>
+                    ) : null}
+                    <input
+                      ref={langFileRefs[l]}
+                      type="file"
+                      accept="application/pdf"
+                      style={{ display: 'block', marginTop: 6, fontSize: 11 }}
+                      onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        if (f.type && f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) { setError("Solo se admiten PDF."); return; }
+                        if (f.size > 25 * 1024 * 1024) { setError("Archivo supera los 25 MB."); return; }
+                        setPendingLangFiles(m => ({ ...m, [l]: f }));
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="help" style={{ marginTop: 6 }}>
+              Sube versiones traducidas del mismo documento. Quien lo abra podrá elegir el idioma. Si no hay versión en un idioma, se mostrará la principal.
+            </div>
           </div>
         </div>
       </form>
