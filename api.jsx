@@ -45,6 +45,22 @@
     }, 50 * 60 * 1000);
   }
 
+  // Consume tokens forwarded by the hub (#access_token=...&refresh_token=...).
+  // Kept opt-in instead of detectSessionInUrl:true because the built-in
+  // detector acquires the auth lock on every page load, which compounds the
+  // free-tier latency described above. Runs once, clears the hash, no-op
+  // otherwise.
+  if (client && typeof window !== "undefined" && window.location.hash) {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const access_token = params.get("access_token");
+    const refresh_token = params.get("refresh_token");
+    if (access_token && refresh_token) {
+      client.auth.setSession({ access_token, refresh_token })
+        .then(() => history.replaceState(null, "", window.location.pathname + window.location.search))
+        .catch(() => {});
+    }
+  }
+
   // ── Mapping helpers (camelCase ↔ snake_case) ───────────────────────
 
   const docFromRow = (r) => ({
