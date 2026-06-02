@@ -46,18 +46,29 @@
   }
 
   // Consume tokens forwarded by the hub (#access_token=...&refresh_token=...).
-  // Kept opt-in instead of detectSessionInUrl:true because the built-in
-  // detector acquires the auth lock on every page load, which compounds the
-  // free-tier latency described above. Runs once, clears the hash, no-op
-  // otherwise.
+  // We intentionally do NOT enable detectSessionInUrl because the built-in
+  // detector acquires the auth lock on every page load, conflicting with the
+  // free-tier-latency workaround above.
+  //
+  // After setSession resolves the session is persisted in localStorage. We
+  // then hard-reload to a clean URL: the second load boots the rest of the
+  // bundle with the session already available, avoiding the race where
+  // app.jsx's getSession() runs before setSession resolves and blocks for 60s.
   if (client && typeof window !== "undefined" && window.location.hash) {
     const params = new URLSearchParams(window.location.hash.slice(1));
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
     if (access_token && refresh_token) {
+      // Mark that we're handling a hub handoff so the rest of the bundle can
+      // short-circuit and avoid a flash of the login screen.
+      window.__DOCU_HUB_HANDOFF__ = true;
       client.auth.setSession({ access_token, refresh_token })
-        .then(() => history.replaceState(null, "", window.location.pathname + window.location.search))
-        .catch(() => {});
+        .then(() => window.location.replace(window.location.pathname + window.location.search))
+        .catch((err) => {
+          console.error("Hub SSO setSession failed", err);
+          history.replaceState(null, "", window.location.pathname + window.location.search);
+          window.__DOCU_HUB_HANDOFF__ = false;
+        });
     }
   }
 

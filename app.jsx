@@ -106,6 +106,15 @@ function App() {
   ]);
   useEffect(() => {
     if (!useBackend || isPublicRoute) return;
+    // Hub-handoff in progress: api.jsx is finishing setSession() and will
+    // location.replace() to a clean URL momentarily. Don't kick off boot here
+    // because the about-to-happen reload will redo this useEffect with the
+    // session already persisted; running boot() now would race the reload and
+    // show either a login-screen flash or a stuck spinner.
+    if (typeof window !== "undefined" && window.__DOCU_HUB_HANDOFF__) {
+      setBootStatus("loading");
+      return;
+    }
     let cancelled = false;
     const boot = async () => {
       try {
