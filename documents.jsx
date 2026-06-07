@@ -331,9 +331,17 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
     const nextLangFiles = { ...existingLangs };
     if (useBackend) {
       // Register the primary file under defaultLang as well, so the viewer
-      // can render it as a variant.
+      // can render it as a variant. Persist it as a real document_files row
+      // (re-using the same storage object) so a later upload in another
+      // language can never hide this one.
       if (fileMeta?.key && !nextLangFiles[defaultLang]) {
         nextLangFiles[defaultLang] = { lang: defaultLang, key: fileMeta.key, name: fileMeta.name, size: fileMeta.size, mime: fileMeta.mime };
+        try {
+          await window.DocuApi.registerDocLanguageRow(docId, defaultLang, fileMeta);
+        } catch (err) {
+          // Non-fatal: the default file still lives on documents.file_key.
+          console.warn("registerDocLanguageRow:", err?.message || err);
+        }
       }
       for (const [lc, f] of Object.entries(pendingLangFiles)) {
         if (!f) continue;

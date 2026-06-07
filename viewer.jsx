@@ -20,23 +20,32 @@ window.safeDocFilename = safeDocFilename;
 // uploaded.
 function pickDocFile(doc, wantLang) {
   const variants = doc?.files || {};
-  if (wantLang && variants[wantLang]) return { ...variants[wantLang], lang: wantLang };
   // Default language stored on doc.defaultLang, else "es"
   const def = doc?.defaultLang || "es";
+  if (wantLang && variants[wantLang]) return { ...variants[wantLang], lang: wantLang };
+  // The primary/default-language file may live only on doc.file (legacy: it is
+  // not always mirrored into a document_files row). So when the requested
+  // language IS the default, prefer doc.file before falling back to any other
+  // variant — otherwise selecting the default would wrongly show another lang.
+  if (wantLang && wantLang === def && doc?.file?.key) return { ...doc.file, lang: def };
   if (variants[def]) return { ...variants[def], lang: def };
+  if (doc?.file?.key) return { ...doc.file, lang: def };
   const anyLang = Object.keys(variants)[0];
   if (anyLang) return { ...variants[anyLang], lang: anyLang };
   return doc?.file ? { ...doc.file, lang: def } : null;
 }
 window.pickDocFile = pickDocFile;
 
-// All language codes that have an uploaded PDF for this document.
+// All language codes that have an uploaded PDF for this document. The default
+// language often lives only on doc.file (no document_files row), so it must be
+// included even when other variants exist — otherwise uploading a second
+// language (e.g. DE) would hide the original (e.g. ES).
 function availableLangs(doc) {
   const v = doc?.files || {};
   const langs = Object.keys(v).filter((l) => v[l]?.key || v[l]?.dataUrl);
-  if (langs.length) return langs;
-  if (doc?.file?.key || doc?.file?.dataUrl) return [doc?.defaultLang || "es"];
-  return [];
+  const def = doc?.defaultLang || "es";
+  if ((doc?.file?.key || doc?.file?.dataUrl) && !langs.includes(def)) langs.unshift(def);
+  return langs;
 }
 window.availableLangs = availableLangs;
 

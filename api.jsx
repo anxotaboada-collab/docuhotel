@@ -486,6 +486,26 @@
     return { lang, key, name: file.name, size: file.size, mime: file.type };
   }
 
+  // Register an already-uploaded storage object as the document_files row for a
+  // language, WITHOUT re-uploading the bytes. Used to mirror the primary/default
+  // file into document_files so every language — including the default — is a
+  // first-class variant. Without this, uploading a second language hides the
+  // default one (it had no document_files row of its own).
+  async function registerDocLanguageRow(docId, lang, fileMeta) {
+    if (offline || !fileMeta?.key) return null;
+    if (!["es","en","de","pt"].includes(lang)) throw new Error("Idioma no soportado: " + lang);
+    const { data: { user } = {} } = await client.auth.getUser();
+    const row = {
+      document_id: docId, lang, file_key: fileMeta.key,
+      file_name: fileMeta.name || null, file_size: fileMeta.size || null,
+      file_mime: fileMeta.mime || null,
+      uploaded_by: user?.id || null, uploaded_at: new Date().toISOString(),
+    };
+    const { error } = await client.from("document_files").upsert(row, { onConflict: "document_id,lang" });
+    if (error) throw error;
+    return { lang, key: fileMeta.key, name: fileMeta.name, size: fileMeta.size, mime: fileMeta.mime };
+  }
+
   async function deleteDocLanguageFile(docId, lang) {
     if (offline) return;
     const { data: existing } = await client.from("document_files").select("file_key").eq("document_id", docId).eq("lang", lang).maybeSingle();
@@ -793,7 +813,7 @@
     client,
     getSession, getMe,
     loadFullState, saveDiff,
-    uploadDocFile, uploadDocLanguageFile, deleteDocLanguageFile,
+    uploadDocFile, uploadDocLanguageFile, registerDocLanguageRow, deleteDocLanguageFile,
     uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
