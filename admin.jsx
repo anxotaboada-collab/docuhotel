@@ -4,6 +4,7 @@ function AdminPage({ state, setState, t, lang, log, onImpersonate }) {
   const [section, setSection] = React.useState("categories");
   const sections = [
     ["categories",   t.admin.sections.categories],
+    ["themes",       t.admin.sections.themes || "Temas"],
     ["departments",  t.admin.sections.departments],
     ["statuses",     t.admin.sections.statuses],
     ["periods",      t.admin.sections.periods],
@@ -33,6 +34,9 @@ function AdminPage({ state, setState, t, lang, log, onImpersonate }) {
           {section === "categories"   && <SimpleListAdmin state={state} setState={setState} t={t} log={log}
               keyName="categories" title={t.admin.sections.categories} help={t.admin.categoriesHelp}
               addLabel={t.admin.newCategory} logAction="cat_change" />}
+          {section === "themes"       && <SimpleListAdmin state={state} setState={setState} t={t} log={log}
+              keyName="themes" title={t.admin.sections.themes || "Temas"} help={t.admin.themesHelp}
+              addLabel={t.admin.newTheme || "Nuevo tema"} logAction="theme_change" />}
           {section === "departments"  && <SimpleListAdmin state={state} setState={setState} t={t} log={log}
               keyName="departments" title={t.admin.sections.departments} help={t.admin.departmentsHelp}
               addLabel={t.admin.newDepartment} logAction="dep_change" />}
@@ -55,23 +59,23 @@ function SimpleListAdmin({ state, setState, t, log, keyName, title, help, addLab
   const [newName, setNewName] = React.useState("");
   const [editingId, setEditingId] = React.useState(null);
   const [editingName, setEditingName] = React.useState("");
-  const items = state[keyName];
+  const items = state[keyName] || [];
   const add = () => {
     const name = newName.trim();
     if (!name) return;
     const id = window.DocuStore.uid(keyName.slice(0,3));
-    setState(s => ({ ...s, [keyName]: [...s[keyName], { id, name }] }));
+    setState(s => ({ ...s, [keyName]: [...(s[keyName] || []), { id, name }] }));
     log(logAction, `+ ${name}`);
     setNewName("");
   };
   const remove = (id) => {
     const it = items.find(i => i.id === id);
-    setState(s => ({ ...s, [keyName]: s[keyName].filter(i => i.id !== id) }));
+    setState(s => ({ ...s, [keyName]: (s[keyName] || []).filter(i => i.id !== id) }));
     log(logAction, `− ${it?.name || id}`);
   };
   const startEdit = (it) => { setEditingId(it.id); setEditingName(it.name); };
   const saveEdit = () => {
-    setState(s => ({ ...s, [keyName]: s[keyName].map(i => i.id === editingId ? { ...i, name: editingName.trim() || i.name } : i) }));
+    setState(s => ({ ...s, [keyName]: (s[keyName] || []).map(i => i.id === editingId ? { ...i, name: editingName.trim() || i.name } : i) }));
     log(logAction, `~ ${editingName}`);
     setEditingId(null);
   };

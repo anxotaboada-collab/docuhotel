@@ -21,6 +21,7 @@ import { join } from "node:path";
 const FILES = [
   "tweaks-panel.jsx",
   "i18n.jsx",
+  "compress.jsx",
   "api.jsx",
   "store.jsx",
   "ui.jsx",

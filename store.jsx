@@ -14,6 +14,14 @@ const DEFAULT_CATEGORIES = [
   { id: "cat_prl",       name: "Prevención de riesgos" },
 ];
 
+// Global taxonomy: the same theme list is shared by every hotel.
+const DEFAULT_THEMES = [
+  { id: "theme_medioambiente", name: "Medio ambiente", sort: 0 },
+  { id: "theme_calidad",       name: "Calidad", sort: 1 },
+  { id: "theme_seguridad",     name: "Seguridad y salud", sort: 2 },
+  { id: "theme_rrhh",          name: "Recursos humanos", sort: 3 },
+];
+
 const DEFAULT_DEPARTMENTS = [
   { id: "dep_housekeeping", name: "Housekeeping" },
   { id: "dep_fb",           name: "F&B" },
@@ -163,6 +171,7 @@ function defaultState() {
   return {
     statuses: DEFAULT_STATUSES,
     categories: DEFAULT_CATEGORIES,
+    themes: DEFAULT_THEMES,
     departments: DEFAULT_DEPARTMENTS,
     periods: DEFAULT_PERIODS,
     responsibles: DEFAULT_RESPONSIBLES,

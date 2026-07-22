@@ -80,6 +80,7 @@
     title: r.title,
     description: r.description || "",
     categoryId: r.category_id,
+    themeId: r.theme_id,
     statusId: r.status_id,
     departments: r.departments || [],
     responsibleIds: r.responsible_ids || [],
@@ -115,6 +116,7 @@
     title: d.title,
     description: d.description || "",
     category_id: d.categoryId || null,
+    theme_id: d.themeId || null,
     status_id: d.statusId || null,
     period_id: d.periodId || null,
     departments: d.departments || [],
@@ -248,13 +250,15 @@
       return q;
     });
     // First wave — fire everything that doesn't depend on another query at once.
-    const [results, dhRes, reqRes] = await Promise.all([
+    const [results, dhRes, reqRes, themesRes] = await Promise.all([
       Promise.all(tableQ),
       // Only the rows that share a document INTO this hotel — not every
       // document_hotels row in the system (RLS already scopes this to hotels
       // the user can access, but a regional admin can access all of them).
       client.from("document_hotels").select("document_id, hotel_id").eq("hotel_id", hotelId),
       client.from("requests").select("*").eq("hotel_id", hotelId),
+      // Themes are a GLOBAL taxonomy (no hotel_id): one list shared by all hotels.
+      client.from("themes").select("*").order("sort", { ascending: true }),
     ]);
     _perf("wave 1");
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
@@ -313,6 +317,7 @@
       hotelId,
       statuses:    byTable.statuses.map((s) => ({ id: s.id, key: s.key, color: s.color, bg: s.bg, label: s.label })),
       categories:  byTable.categories.map((c) => ({ id: c.id, name: c.name })),
+      themes:      (themesRes.data || []).map((c) => ({ id: c.id, name: c.name, sort: c.sort ?? 0 })),
       departments: byTable.departments.map((d) => ({ id: d.id, name: d.name })),
       periods:     byTable.periods.map((p) => ({ id: p.id, months: p.months, manual: !!p.manual, label: p.label })),
       responsibles:byTable.responsibles.map((r) => ({ id: r.id, name: r.name, email: r.email })),
@@ -378,6 +383,8 @@
 
     await Promise.all([
       persistTable("categories",   hotelId, prev?.categories,   next.categories,   (x, h) => ({ id: x.id, hotel_id: h, name: x.name })),
+      // Global table: no hotel_id column, same rows for every hotel.
+      persistTable("themes",       hotelId, prev?.themes,       next.themes,       (x) => ({ id: x.id, name: x.name, sort: x.sort ?? 0 })),
       persistTable("departments",  hotelId, prev?.departments,  next.departments,  (x, h) => ({ id: x.id, hotel_id: h, name: x.name })),
       persistTable("statuses",     hotelId, prev?.statuses,     next.statuses,     (x, h) => ({ id: x.id, hotel_id: h, key: x.key, color: x.color, bg: x.bg, label: x.label })),
       persistTable("periods",      hotelId, prev?.periods,      next.periods,      (x, h) => ({ id: x.id, hotel_id: h, months: x.months || 0, manual: !!x.manual, label: x.label })),
@@ -455,6 +462,7 @@
 
   async function uploadDocFile(hotelId, docId, file) {
     if (offline) return null;
+    file = await window.DocuCompress.compressForUpload(file);
     const safe = file.name.replace(/[^\w.\-]+/g, "_");
     const key = `docs/${hotelId}/${docId}/${Date.now()}_${safe}`;
     const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
@@ -469,6 +477,7 @@
   async function uploadDocLanguageFile(hotelId, docId, lang, file) {
     if (offline) return null;
     if (!["es","en","de","pt"].includes(lang)) throw new Error("Idioma no soportado: " + lang);
+    file = await window.DocuCompress.compressForUpload(file);
     const safe = file.name.replace(/[^\w.\-]+/g, "_");
     const key = `docs/${hotelId}/${docId}/${lang}/${Date.now()}_${safe}`;
     const up = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
@@ -527,7 +536,7 @@
     return (data || []).map((r) => ({
       id: r.id, hotelId: r.hotel_id,
       title: r.title, description: r.description || "",
-      categoryId: r.category_id, statusId: r.status_id, periodId: r.period_id,
+      categoryId: r.category_id, themeId: r.theme_id, statusId: r.status_id, periodId: r.period_id,
       departments: r.departments || [],
       startDate: r.start_date, expiryDate: r.expiry_date,
       version: r.version, publicAccess: !!r.public_access,
@@ -554,6 +563,7 @@
 
   async function uploadRequestFile(requestId, itemId, uploadId, file) {
     if (offline) return null;
+    file = await window.DocuCompress.compressForUpload(file);
     const safe = file.name.replace(/[^\w.\-]+/g, "_");
     const key = `requests/${requestId}/${itemId}/${uploadId}_${safe}`;
     const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
@@ -690,6 +700,7 @@
     const ownerHotel = hotelIds[0];
     let fileMeta = null;
     if (file) {
+      file = await window.DocuCompress.compressForUpload(file);
       const safe = file.name.replace(/[^\w.\-]+/g, "_");
       const key = `docs/${ownerHotel}/${docId}/${Date.now()}_${safe}`;
       const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
@@ -701,7 +712,7 @@
     const row = {
       id: docId, hotel_id: ownerHotel,
       title: fields.title, description: fields.description || "",
-      category_id: fields.categoryId || null, status_id: fields.statusId || null, period_id: fields.periodId || null,
+      category_id: fields.categoryId || null, theme_id: fields.themeId || null, status_id: fields.statusId || null, period_id: fields.periodId || null,
       departments: ["*"], responsible_ids: [],
       start_date: fields.startDate || null, expiry_date: fields.expiryDate || null,
       version: 1, public_access: !!fields.publicAccess, linked_doc_ids: [],

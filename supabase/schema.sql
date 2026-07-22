@@ -62,6 +62,21 @@ create table if not exists categories (
 );
 create index if not exists idx_categories_hotel on categories(hotel_id);
 
+-- GLOBAL taxonomy (no hotel_id): document themes ("Temas"). One shared list
+-- for every hotel; any hotel admin/dept_head (or regional) can edit it.
+create table if not exists themes (
+  id        text primary key,
+  name      text not null,
+  sort      int  not null default 0,
+  created_at timestamptz not null default now()
+);
+insert into themes (id, name, sort) values
+  ('theme_medioambiente', 'Medio ambiente', 0),
+  ('theme_calidad',       'Calidad', 1),
+  ('theme_seguridad',     'Seguridad y salud', 2),
+  ('theme_rrhh',          'Recursos humanos', 3)
+on conflict (id) do nothing;
+
 create table if not exists departments (
   id        text primary key,
   hotel_id  uuid not null references hotels(id) on delete cascade,
@@ -113,6 +128,7 @@ create table if not exists documents (
   title           text not null,
   description     text default '',
   category_id     text references categories(id) on delete set null,
+  theme_id        text references themes(id) on delete set null,
   status_id       text references statuses(id) on delete set null,
   period_id       text references periods(id) on delete set null,
   departments     text[] not null default '{}',           -- '*' means all
@@ -288,6 +304,7 @@ $do$;
 alter table hotels          enable row level security;
 alter table app_users       enable row level security;
 alter table categories      enable row level security;
+alter table themes          enable row level security;
 alter table departments     enable row level security;
 alter table statuses        enable row level security;
 alter table periods         enable row level security;
@@ -403,6 +420,15 @@ create policy app_users_admin_write on app_users
   with check ((user_can_access(hotel_id) and current_user_role() = 'admin') or user_is_regional());
 drop policy if exists app_users_self_update on app_users;
 create policy app_users_self_update on app_users for update using (id = auth.uid()) with check (id = auth.uid());
+
+-- Themes: global table (no hotel_id). Existing DBs: make sure the column exists.
+alter table documents add column if not exists theme_id text references themes(id) on delete set null;
+drop policy if exists themes_select on themes;
+create policy themes_select on themes for select using (true);
+drop policy if exists themes_admin_write on themes;
+create policy themes_admin_write on themes
+  for all using (current_user_role() in ('admin','dept_head') or user_is_regional())
+  with check (current_user_role() in ('admin','dept_head') or user_is_regional());
 
 -- Generic hotel-scoped policies (same shape repeated)
 do $do$
@@ -829,6 +855,7 @@ create function list_all_documents_for_user() returns table (
   title text,
   description text,
   category_id text,
+  theme_id text,
   status_id text,
   period_id text,
   departments text[],
@@ -857,7 +884,7 @@ language sql stable security definer set search_path = public as $fn$
     where dh.hotel_id in (select hotel_id from accessible)
   )
   select
-    d.id, d.hotel_id, d.title, d.description, d.category_id, d.status_id, d.period_id,
+    d.id, d.hotel_id, d.title, d.description, d.category_id, d.theme_id, d.status_id, d.period_id,
     d.departments, d.start_date, d.expiry_date, d.version, d.public_access,
     d.file_name, d.file_key, d.file_size, coalesce(d.default_lang, 'es') as default_lang, d.uploaded_at,
     coalesce(

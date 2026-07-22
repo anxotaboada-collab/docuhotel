@@ -48,7 +48,7 @@ function StatusPill({ status, t }) {
 }
 
 function ExpiryCell({ iso, t }) {
-  if (!iso) return <span className="muted">—</span>;
+  if (!iso) return <span className="muted">∞ {t.documents?.noExpiry || "No caduca"}</span>;
   const days = window.DocuStore.daysUntil(iso);
   const date = new Date(iso).toLocaleDateString(t._lang === "es" ? "es-ES" : t._lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" });
   let icon = null;

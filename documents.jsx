@@ -5,6 +5,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
   const [filterStatus, setFilterStatus] = React.useState("all"); // all | active | draft | expiring | <statusId>
   const [search, setSearch] = React.useState("");
   const [filterCategory, setFilterCategory] = React.useState("");
+  const [filterTheme, setFilterTheme] = React.useState("");
   const [filterDepartment, setFilterDepartment] = React.useState("");
   const [filterResponsible, setFilterResponsible] = React.useState("");
   const [filterDateFrom, setFilterDateFrom] = React.useState("");
@@ -14,6 +15,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
 
   const statusById = Object.fromEntries(state.statuses.map(s => [s.id, s]));
   const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
+  const themeById = Object.fromEntries((state.themes || []).map(c => [c.id, c]));
   const depById = Object.fromEntries(state.departments.map(d => [d.id, d]));
   const respById = Object.fromEntries(state.responsibles.map(r => [r.id, r]));
   const userById = Object.fromEntries(state.users.map(u => [u.id, u]));
@@ -56,6 +58,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
       if (d.statusId !== filterStatus) return false;
     }
     if (filterCategory && d.categoryId !== filterCategory) return false;
+    if (filterTheme && d.themeId !== filterTheme) return false;
     if (filterDepartment) {
       if (!(d.departments.includes("*") || d.departments.includes(filterDepartment))) return false;
     }
@@ -70,7 +73,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
   });
 
   const reset = () => {
-    setFilterStatus("all"); setSearch(""); setFilterCategory(""); setFilterDepartment(""); setFilterResponsible(""); setFilterDateFrom(""); setFilterDateTo("");
+    setFilterStatus("all"); setSearch(""); setFilterCategory(""); setFilterTheme(""); setFilterDepartment(""); setFilterResponsible(""); setFilterDateFrom(""); setFilterDateTo("");
   };
 
   const handleSave = (doc) => {
@@ -147,6 +150,10 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
           <option value="">{t.common.category}: {t.common.all}</option>
           {state.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        <select className="select" value={filterTheme} onChange={e => setFilterTheme(e.target.value)}>
+          <option value="">{t.common.topic}: {t.common.all}</option>
+          {(state.themes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
         <select className="select" value={filterDepartment} onChange={e => setFilterDepartment(e.target.value)}>
           <option value="">{t.common.department}: {t.common.all}</option>
           {state.departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -171,6 +178,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
             <tr>
               <th>{t.documents.table.title}</th>
               <th>{t.documents.table.category}</th>
+              <th>{t.documents.table.theme}</th>
               <th>{t.documents.table.status}</th>
               <th>{t.documents.table.department}</th>
               <th>{t.documents.table.startDate}</th>
@@ -181,7 +189,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={8}><div className="empty-state">{t.common.empty}</div></td></tr>
+              <tr><td colSpan={9}><div className="empty-state">{t.common.empty}</div></td></tr>
             )}
             {filtered.map(d => {
               const st = statusById[d.statusId];
@@ -202,6 +210,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
                     </div>
                   </td>
                   <td>{cat?.name || "—"}</td>
+                  <td>{themeById[d.themeId]?.name || "—"}</td>
                   <td><StatusPill status={st} t={t} /></td>
                   <td>
                     <div className="chip-stack">
@@ -260,11 +269,13 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
   const [title, setTitle] = React.useState(doc?.title || initialTitle || "");
   const [description, setDescription] = React.useState(doc?.description || "");
   const [categoryId, setCategoryId] = React.useState(doc?.categoryId || state.categories[0]?.id || "");
+  const [themeId, setThemeId] = React.useState(doc?.themeId || "");
   const [statusId, setStatusId] = React.useState(doc?.statusId || state.statuses.find(s => s.key === "draft")?.id || state.statuses[0]?.id);
   const [departments, setDepartments] = React.useState(doc?.departments || ["*"]);
   const [responsibleIds, setResponsibleIds] = React.useState(doc?.responsibleIds || []);
   const [publicAccess, setPublicAccess] = React.useState(!!doc?.publicAccess);
-  const [periodId, setPeriodId] = React.useState(doc?.periodId || state.periods.find(p => p.months === 12)?.id || state.periods[0]?.id);
+  // periodId "" = the document never expires (no period, no expiry date).
+  const [periodId, setPeriodId] = React.useState(doc ? (doc.periodId || "") : (state.periods.find(p => p.months === 12)?.id || state.periods[0]?.id));
   const [startDate, setStartDate] = React.useState(doc?.startDate?.slice(0,10) || new Date().toISOString().slice(0,10));
   const [manualExpiry, setManualExpiry] = React.useState(doc?.expiryDate?.slice(0,10) || "");
   const [file, setFile] = React.useState(doc?.file || initialFile || null);
@@ -282,11 +293,13 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
 
   const period = state.periods.find(p => p.id === periodId);
   const isManual = period?.manual;
+  const neverExpires = !periodId;
   const expiryDate = React.useMemo(() => {
+    if (neverExpires) return null;
     if (isManual) return manualExpiry ? new Date(manualExpiry).toISOString() : null;
     if (!startDate || !period) return null;
     return window.DocuStore.addMonths(new Date(startDate).toISOString(), period.months);
-  }, [startDate, period, isManual, manualExpiry]);
+  }, [startDate, period, isManual, manualExpiry, neverExpires]);
 
   const [pendingFile, setPendingFile] = React.useState(null); // raw File object to upload on submit
   const [uploading, setUploading] = React.useState(false);
@@ -363,10 +376,11 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       title: title.trim(),
       description,
       categoryId,
+      themeId: themeId || null,
       statusId,
       departments: departments.length ? departments : ["*"],
       responsibleIds,
-      periodId,
+      periodId: periodId || null,
       startDate: new Date(startDate).toISOString(),
       expiryDate,
       uploadedBy: doc?.uploadedBy || state.config.currentUserId,
@@ -413,6 +427,13 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
             </select>
           </div>
           <div className="field">
+            <label>{t.common.topic}</label>
+            <select className="select" value={themeId} onChange={e => setThemeId(e.target.value)}>
+              <option value="">—</option>
+              {(state.themes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="field">
             <label>{t.common.status}</label>
             <select className="select" value={statusId} onChange={e => setStatusId(e.target.value)}>
               {state.statuses.map(s => <option key={s.id} value={s.id}>{(t.statuses && t.statuses[s.key]) || s.label?.[lang] || s.key}</option>)}
@@ -443,6 +464,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
           <div className="field">
             <label>{t.documents.validityPeriod}</label>
             <select className="select" value={periodId} onChange={e => setPeriodId(e.target.value)}>
+              <option value="">∞ {t.documents.noExpiry}</option>
               {state.periods.map(p => <option key={p.id} value={p.id}>{p.label?.[lang] || `${p.months} m`}</option>)}
             </select>
           </div>
@@ -451,11 +473,11 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
             <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
           </div>
           <div className="field full">
-            <label>{t.documents.endDate} <span className="help">— {isManual ? t.admin.manualExpiryHelp : t.documents.autoCalculated}</span></label>
-            {isManual ? (
+            <label>{t.documents.endDate} <span className="help">— {neverExpires ? t.documents.noExpiry : isManual ? t.admin.manualExpiryHelp : t.documents.autoCalculated}</span></label>
+            {isManual && !neverExpires ? (
               <input type="date" className="input" value={manualExpiry} onChange={e => setManualExpiry(e.target.value)} />
             ) : (
-              <input className="input" disabled value={expiryDate ? new Date(expiryDate).toLocaleDateString() : ""} />
+              <input className="input" disabled value={neverExpires ? `∞ ${t.documents.noExpiry}` : expiryDate ? new Date(expiryDate).toLocaleDateString() : ""} />
             )}
           </div>
           <div className="field full">
