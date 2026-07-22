@@ -4,15 +4,19 @@
 // the docuhotel_ai_config RPC). Supports Mistral (Pixtral) and Gemini.
 
 (function () {
-  // Render the first pages of the PDF to JPEG data-URLs (vision input).
+  // Render the first pages + the LAST page of the PDF to JPEG data-URLs.
+  // The last page matters: signatures and signing dates usually live there.
   async function pdfToImages(file, maxPages = 2, maxDim = 1400) {
     const lib = await window.ensurePdfJs();
     if (!lib) throw new Error("pdf.js no disponible");
     const data = await file.arrayBuffer();
     const pdf = await lib.getDocument({ data }).promise;
     const n = Math.min(pdf.numPages, maxPages);
+    const pageNums = [];
+    for (let i = 1; i <= n; i++) pageNums.push(i);
+    if (pdf.numPages > n) pageNums.push(pdf.numPages);
     const out = [];
-    for (let i = 1; i <= n; i++) {
+    for (const i of pageNums) {
       const page = await pdf.getPage(i);
       const vp1 = page.getViewport({ scale: 1 });
       const scale = Math.min(2.5, maxDim / Math.max(vp1.width, vp1.height));
@@ -44,9 +48,10 @@
       li(state.themes),
       '- "departments": array con los ids de los departamentos afectados, ["*"] si afecta a todo el hotel, o null si no está claro. Departamentos:',
       li(state.departments),
-      '- "startDate": fecha de emisión/entrada en vigor del documento en formato YYYY-MM-DD, o null si no aparece.',
-      '- "expiryDate": fecha de caducidad / validez / próxima revisión en formato YYYY-MM-DD, o null si el documento no la indica.',
-      "Usa null cuando no estés razonablemente seguro. No inventes fechas.",
+      '- "startDate": fecha del documento en formato YYYY-MM-DD. Busca con atención: la fecha de FIRMA (suele estar al final, junto a firmas o sellos, p.ej. "En Madrid, a 5 de marzo de 2026"), o si no la fecha de emisión/entrada en vigor/inspección que figure en el encabezado. Solo null si de verdad no hay ninguna fecha.',
+      '- "expiryDate": fecha de caducidad en formato YYYY-MM-DD. Búscala como fecha explícita ("válido hasta", "caducidad", "próxima inspección/revisión antes de") O como periodo de validez ("validez: 12 meses", "renovación anual") — en ese caso calcúlala sumando el periodo a startDate. null solo si el documento no indica ni fecha ni periodo de validez.',
+      '- "validityMonths": número de meses de validez si el documento lo indica (12 para anual, 6 para semestral…), o null.',
+      "Se incluyen las primeras páginas y la ÚLTIMA página del documento (donde suelen estar las firmas). No inventes fechas que no estén en el documento.",
     ].join("\n");
   }
 
@@ -131,6 +136,7 @@
       departments,
       startDate: isDate(r.startDate) ? r.startDate : null,
       expiryDate: isDate(r.expiryDate) ? r.expiryDate : null,
+      validityMonths: Number.isFinite(+r.validityMonths) && +r.validityMonths > 0 ? Math.round(+r.validityMonths) : null,
     };
   }
 

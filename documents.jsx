@@ -321,13 +321,22 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       if (r.themeId) setThemeId(r.themeId);
       if (r.departments) setDepartments(r.departments);
       if (r.startDate) setStartDate(r.startDate);
+      const startIso = new Date(r.startDate || startDate).toISOString();
       if (r.expiryDate) {
-        const startIso = new Date(r.startDate || startDate).toISOString();
         const match = state.periods.find(p => !p.manual && p.months && window.DocuStore.addMonths(startIso, p.months).slice(0, 10) === r.expiryDate);
         if (match) setPeriodId(match.id);
         else {
           const man = state.periods.find(p => p.manual);
           if (man) { setPeriodId(man.id); setManualExpiry(r.expiryDate); }
+        }
+      } else if (r.validityMonths) {
+        // The document states a validity period but no explicit date: pick the
+        // matching period, or fall back to computing the date on the manual one.
+        const match = state.periods.find(p => !p.manual && p.months === r.validityMonths);
+        if (match) setPeriodId(match.id);
+        else {
+          const man = state.periods.find(p => p.manual);
+          if (man) { setPeriodId(man.id); setManualExpiry(window.DocuStore.addMonths(startIso, r.validityMonths).slice(0, 10)); }
         }
       }
       setAiState("done");
