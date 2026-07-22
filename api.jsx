@@ -316,7 +316,7 @@
     return {
       hotelId,
       statuses:    byTable.statuses.map((s) => ({ id: s.id, key: s.key, color: s.color, bg: s.bg, label: s.label })),
-      categories:  byTable.categories.map((c) => ({ id: c.id, name: c.name })),
+      categories:  byTable.categories.map((c) => ({ id: c.id, name: c.name, color: c.color || null, bg: c.bg || null })),
       themes:      (themesRes.data || []).map((c) => ({ id: c.id, name: c.name, sort: c.sort ?? 0 })),
       departments: byTable.departments.map((d) => ({ id: d.id, name: d.name })),
       periods:     byTable.periods.map((p) => ({ id: p.id, months: p.months, manual: !!p.manual, label: p.label })),
@@ -382,7 +382,7 @@
     const hotelId = next.hotelId;
 
     await Promise.all([
-      persistTable("categories",   hotelId, prev?.categories,   next.categories,   (x, h) => ({ id: x.id, hotel_id: h, name: x.name })),
+      persistTable("categories",   hotelId, prev?.categories,   next.categories,   (x, h) => ({ id: x.id, hotel_id: h, name: x.name, color: x.color || null, bg: x.bg || null })),
       // Global table: no hotel_id column, same rows for every hotel.
       persistTable("themes",       hotelId, prev?.themes,       next.themes,       (x) => ({ id: x.id, name: x.name, sort: x.sort ?? 0 })),
       persistTable("departments",  hotelId, prev?.departments,  next.departments,  (x, h) => ({ id: x.id, hotel_id: h, name: x.name })),
@@ -819,9 +819,23 @@
 
   // ── Expose ──────────────────────────────────────────────────────────
 
+  // AI autofill: shared provider/key from the Gastos de Viaje app
+  // (viaje.ocr_config) via a SECURITY DEFINER RPC. Cached for the session.
+  let _aiCfg = null;
+  async function aiConfig() {
+    if (offline) return null;
+    if (_aiCfg) return _aiCfg;
+    const { data, error } = await client.rpc("docuhotel_ai_config");
+    if (error) { console.warn("docuhotel_ai_config", error); return null; }
+    if (!data || !data.api_key) return null;
+    _aiCfg = data;
+    return _aiCfg;
+  }
+
   window.DocuApi = {
     offline,
     client,
+    aiConfig,
     getSession, getMe,
     loadFullState, saveDiff,
     uploadDocFile, uploadDocLanguageFile, registerDocLanguageRow, deleteDocLanguageFile,

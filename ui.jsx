@@ -47,6 +47,19 @@ function StatusPill({ status, t }) {
   return <span className={`pill ${cls}`} style={customStyle}><span className="dot" />{label}</span>;
 }
 
+// Category chip: plain text unless the category has a configured color/shade.
+function CategoryPill({ cat }) {
+  if (!cat) return "—";
+  if (!cat.bg && !cat.color) return cat.name;
+  return (
+    <span className="pill" style={{
+      background: cat.bg || "transparent",
+      color: cat.color || "inherit",
+      borderColor: cat.bg ? "transparent" : undefined,
+    }}>{cat.name}</span>
+  );
+}
+
 function ExpiryCell({ iso, t }) {
   if (!iso) return <span className="muted">∞ {t.documents?.noExpiry || "No caduca"}</span>;
   const days = window.DocuStore.daysUntil(iso);

@@ -33,7 +33,7 @@ function AdminPage({ state, setState, t, lang, log, onImpersonate }) {
         <div className="admin-section">
           {section === "categories"   && <SimpleListAdmin state={state} setState={setState} t={t} log={log}
               keyName="categories" title={t.admin.sections.categories} help={t.admin.categoriesHelp}
-              addLabel={t.admin.newCategory} logAction="cat_change" />}
+              addLabel={t.admin.newCategory} logAction="cat_change" withColors />}
           {section === "themes"       && <SimpleListAdmin state={state} setState={setState} t={t} log={log}
               keyName="themes" title={t.admin.sections.themes || "Temas"} help={t.admin.themesHelp}
               addLabel={t.admin.newTheme || "Nuevo tema"} logAction="theme_change" />}
@@ -55,11 +55,27 @@ function AdminPage({ state, setState, t, lang, log, onImpersonate }) {
   );
 }
 
-function SimpleListAdmin({ state, setState, t, log, keyName, title, help, addLabel, logAction }) {
+// Shaded color presets (text + background pairs), same palette as statuses.
+const LIST_COLOR_PRESETS = [
+  { color: "#14532d", bg: "#dcfce7" }, // green
+  { color: "#1e3a8a", bg: "#dbeafe" }, // blue
+  { color: "#b45309", bg: "#fef3c7" }, // amber
+  { color: "#991b1b", bg: "#fee2e2" }, // red
+  { color: "#581c87", bg: "#f3e8ff" }, // purple
+  { color: "#0e7490", bg: "#cffafe" }, // teal
+  { color: "#404040", bg: "#e5e5e3" }, // gray
+  { color: "#7c2d12", bg: "#fed7aa" }, // orange
+];
+
+function SimpleListAdmin({ state, setState, t, log, keyName, title, help, addLabel, logAction, withColors }) {
   const [newName, setNewName] = React.useState("");
   const [editingId, setEditingId] = React.useState(null);
   const [editingName, setEditingName] = React.useState("");
   const items = state[keyName] || [];
+  const setColor = (it, preset) => {
+    setState(s => ({ ...s, [keyName]: (s[keyName] || []).map(i => i.id === it.id ? { ...i, color: preset?.color || null, bg: preset?.bg || null } : i) }));
+    log(logAction, `~ ${it.name} (color)`);
+  };
   const add = () => {
     const name = newName.trim();
     if (!name) return;
@@ -89,7 +105,38 @@ function SimpleListAdmin({ state, setState, t, log, keyName, title, help, addLab
             {editingId === it.id ? (
               <input className="input" value={editingName} onChange={e => setEditingName(e.target.value)} autoFocus />
             ) : (
-              <div className="name">{it.name}</div>
+              <div className="name">
+                {withColors && (it.bg || it.color)
+                  ? <span className="pill" style={{ background: it.bg || "transparent", color: it.color || "inherit", borderColor: "transparent" }}>{it.name}</span>
+                  : it.name}
+              </div>
+            )}
+            {withColors && editingId !== it.id && (
+              <div style={{ display: "flex", gap: 4, alignItems: "center", marginRight: 8 }}>
+                <button
+                  type="button"
+                  title="Sin color"
+                  onClick={() => setColor(it, null)}
+                  style={{
+                    width: 18, height: 18, borderRadius: "50%", cursor: "pointer", padding: 0,
+                    background: "transparent", color: "var(--muted)", fontSize: 11, lineHeight: "16px",
+                    border: (!it.bg && !it.color) ? "2px solid var(--ink)" : "1px solid var(--line)",
+                  }}
+                >∅</button>
+                {LIST_COLOR_PRESETS.map(p => (
+                  <button
+                    type="button"
+                    key={p.bg}
+                    title={p.bg}
+                    onClick={() => setColor(it, p)}
+                    style={{
+                      width: 18, height: 18, borderRadius: "50%", cursor: "pointer", padding: 0,
+                      background: p.bg,
+                      border: it.bg === p.bg ? `2px solid ${p.color}` : "1px solid var(--line)",
+                    }}
+                  />
+                ))}
+              </div>
             )}
             {editingId === it.id ? (
               <>

@@ -23,6 +23,7 @@ const FILES = [
   "i18n.jsx",
   "compress.jsx",
   "api.jsx",
+  "ai.jsx",
   "store.jsx",
   "ui.jsx",
   "auth.jsx",

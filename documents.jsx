@@ -209,7 +209,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
                       </div>
                     </div>
                   </td>
-                  <td>{cat?.name || "—"}</td>
+                  <td><CategoryPill cat={cat} /></td>
                   <td>{themeById[d.themeId]?.name || "—"}</td>
                   <td><StatusPill status={st} t={t} /></td>
                   <td>
@@ -303,6 +303,39 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
 
   const [pendingFile, setPendingFile] = React.useState(null); // raw File object to upload on submit
   const [uploading, setUploading] = React.useState(false);
+  const [aiState, setAiState] = React.useState(""); // "" | busy | done | noconfig | error
+  const canAI = !!(window.DocuAI && window.DocuApi && !window.DocuApi.offline);
+
+  // AI autofill: extract metadata from the picked PDF and fill the form.
+  // Title/description only fill if still empty; taxonomy ids and dates are
+  // applied directly (the user reviews everything before saving).
+  const runAI = async (f) => {
+    if (!f || !canAI) return;
+    setAiState("busy");
+    try {
+      const r = await window.DocuAI.extractDocFields(f, state);
+      if (!r) { setAiState("error"); return; }
+      if (r.title) setTitle(prev => prev.trim() ? prev : r.title);
+      if (r.description) setDescription(prev => prev.trim() ? prev : r.description);
+      if (r.categoryId) setCategoryId(r.categoryId);
+      if (r.themeId) setThemeId(r.themeId);
+      if (r.departments) setDepartments(r.departments);
+      if (r.startDate) setStartDate(r.startDate);
+      if (r.expiryDate) {
+        const startIso = new Date(r.startDate || startDate).toISOString();
+        const match = state.periods.find(p => !p.manual && p.months && window.DocuStore.addMonths(startIso, p.months).slice(0, 10) === r.expiryDate);
+        if (match) setPeriodId(match.id);
+        else {
+          const man = state.periods.find(p => p.manual);
+          if (man) { setPeriodId(man.id); setManualExpiry(r.expiryDate); }
+        }
+      }
+      setAiState("done");
+    } catch (e) {
+      console.warn("AI autofill:", e);
+      setAiState(e && e.message === "noconfig" ? "noconfig" : "error");
+    }
+  };
 
   const onPickFile = (f) => {
     setError("");
@@ -315,6 +348,8 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
     }
     setPendingFile(f);
     setFile({ name: f.name, size: f.size, dataUrl: null });
+    // New document: launch the AI capture automatically on pick.
+    if (isNew && canAI) runAI(f);
   };
 
   const handleSubmit = async (e) => {
@@ -509,6 +544,16 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
                 >{l.toUpperCase()}</button>
               ))}
             </div>
+            {canAI && pendingFile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <button type="button" className="btn btn-sm" onClick={() => runAI(pendingFile)} disabled={aiState === "busy"}>
+                  ✨ {aiState === "busy" ? t.documents.aiAnalyzing : t.documents.aiFill}
+                </button>
+                {aiState === "done" && <span className="help" style={{ color: '#14532d' }}>{t.documents.aiApplied}</span>}
+                {aiState === "noconfig" && <span className="help">{t.documents.aiNotConfigured}</span>}
+                {aiState === "error" && <span className="help" style={{ color: 'var(--danger)' }}>{t.documents.aiFailed}</span>}
+              </div>
+            )}
             {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 6 }}>{error}</div>}
           </div>
           <div className="field full">

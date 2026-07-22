@@ -57,10 +57,14 @@ create table if not exists categories (
   id        text primary key,
   hotel_id  uuid not null references hotels(id) on delete cascade,
   name      text not null,
+  color     text,          -- optional shaded look: text color…
+  bg        text,          -- …and background (same palette as statuses)
   sort      int  not null default 0,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_categories_hotel on categories(hotel_id);
+alter table categories add column if not exists color text;
+alter table categories add column if not exists bg text;
 
 -- GLOBAL taxonomy (no hotel_id): document themes ("Temas"). One shared list
 -- for every hotel; any hotel admin/dept_head (or regional) can edit it.
@@ -914,3 +918,31 @@ language sql stable security definer set search_path = public as $fn$
   order by d.title;
 $fn$;
 grant execute on function list_all_documents_for_user() to authenticated;
+
+-- ───────────────────────────────────────────────────────────────────
+-- AI autofill: Docuhotel reuses the SAME AI provider/key configured in the
+-- Gastos de Viaje app (viaje.ocr_config, edited from that app's admin panel).
+-- Returns the first enabled non-manual provider with its shared key/options.
+-- ───────────────────────────────────────────────────────────────────
+create or replace function public.docuhotel_ai_config() returns jsonb
+language sql stable security definer set search_path = public, viaje as $fn$
+  select coalesce(
+    (
+      select jsonb_build_object(
+        'provider', p.id,
+        'api_key',  c.shared_keys->>p.id,
+        'options',  coalesce(c.shared_options->p.id, '{}'::jsonb)
+      )
+      from viaje.ocr_config c
+      cross join lateral unnest(c.enabled_providers) as p(id)
+      where c.id = 1
+        and p.id <> 'manual'
+        and coalesce(c.shared_keys->>p.id, '') <> ''
+      limit 1
+    ),
+    '{}'::jsonb
+  )
+  where auth.uid() is not null;
+$fn$;
+revoke execute on function public.docuhotel_ai_config() from public, anon;
+grant execute on function public.docuhotel_ai_config() to authenticated;

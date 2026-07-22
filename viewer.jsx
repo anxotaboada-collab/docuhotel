@@ -266,7 +266,8 @@ function ViewerModal({ doc, state, t, lang, onClose, onDownloaded, setState, onO
           <h4>{t.viewer.meta}</h4>
           <div className="meta-row"><span className="label">{t.common.title}</span><span className="value">{doc.title}</span></div>
           <div className="meta-row"><span className="label">{t.common.status}</span><span className="value"><StatusPill status={status} t={t} /></span></div>
-          <div className="meta-row"><span className="label">{t.common.category}</span><span className="value">{cat?.name || "—"}</span></div>
+          <div className="meta-row"><span className="label">{t.common.category}</span><span className="value"><CategoryPill cat={cat} /></span></div>
+          <div className="meta-row"><span className="label">{t.common.topic}</span><span className="value">{(state.themes || []).find(x => x.id === doc.themeId)?.name || "—"}</span></div>
           <div className="meta-row"><span className="label">{t.common.departments}</span><span className="value">{departmentNames.join(", ") || "—"}</span></div>
           <div className="meta-row"><span className="label">{t.common.responsibles}</span><span className="value">{respNames.join(", ") || "—"}</span></div>
           <div className="meta-row"><span className="label">{t.documents.startDate}</span><span className="value">{fmtDate(doc.startDate)}</span></div>
