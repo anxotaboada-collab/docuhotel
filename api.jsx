@@ -710,6 +710,15 @@
     return doc.id;
   }
 
+  // Direct upsert of one document row (bypasses the debounced state diff).
+  // Used when the edited doc no longer belongs to the current hotel's local
+  // state (re-homed to another hotel or unshared from this one).
+  async function saveDocumentRow(doc) {
+    if (offline) return;
+    const { error } = await client.from("documents").upsert(docToRow(doc, doc.hotelId), { onConflict: "id" });
+    if (error) throw error;
+  }
+
   async function updateRegionalDocHotels(docId, hotelIds) {
     if (offline) return;
     await client.from("document_hotels").delete().eq("document_id", docId);
@@ -827,7 +836,7 @@
     uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
-    createHotel, listAccessibleHotels, regionalCreateDoc, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
+    createHotel, listAccessibleHotels, regionalCreateDoc, saveDocumentRow, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
     // Exposed so the public-route bootstrap (audit_project RPC, etc.) can

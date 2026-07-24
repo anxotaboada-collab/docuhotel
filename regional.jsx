@@ -333,10 +333,14 @@ function RegionalUpload({ state, setState, t, lang, hotels, pushToast, onDone })
 
   const handleSave = async (doc, hotelIds) => {
     try {
-      await window.DocuApi.regionalCreateDoc(doc, hotelIds, state.hotelId);
+      // The row lives in one of the ticked hotels (prefer the current one).
+      const owner = hotelIds.includes(state.hotelId) ? state.hotelId : hotelIds[0];
+      await window.DocuApi.regionalCreateDoc({ ...doc, hotelId: owner }, hotelIds, owner);
       // Mirror it into the current hotel's local list so it shows up in
-      // "Documentos" without a reload (the row lives in this hotel).
-      setState && setState(s => ({ ...s, documents: [{ ...doc, hotelId: s.hotelId, sharedHotelIds: hotelIds }, ...s.documents] }));
+      // "Documentos" without a reload — only if this hotel is among the ticked.
+      if (hotelIds.includes(state.hotelId)) {
+        setState && setState(s => ({ ...s, documents: [{ ...doc, hotelId: owner, sharedHotelIds: hotelIds }, ...s.documents] }));
+      }
       pushToast && pushToast(`✓ "${doc.title}" creado en ${hotelIds.length} hotel(es)`);
       setOpen(false);
       onDone && onDone();
@@ -351,7 +355,7 @@ function RegionalUpload({ state, setState, t, lang, hotels, pushToast, onDone })
         Mismo formulario completo que "Nuevo documento" (categoría, tema, caducidad, autorrelleno con IA, idiomas…)
         más la lista de hoteles donde debe ser válido. Es <strong>un único documento</strong> sincronizado:
         si lo cambias o descatalogas, cambia para todos los hoteles marcados. No se duplica.
-        Se crea desde el hotel actual (🏨 {currentHotelName}), que queda siempre incluido — cambia de hotel arriba si quieres otro como base.
+        Estás subiendo desde 🏨 {currentHotelName}; marca los hoteles que quieras (mínimo uno).
       </p>
       {!open && (
         <button className="btn btn-primary" onClick={() => setOpen(true)}>➕ Nuevo documento regional</button>

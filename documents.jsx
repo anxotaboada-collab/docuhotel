@@ -100,16 +100,37 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
       sharedHotelIds: hotelIds || prev?.sharedHotelIds || [],
     };
     if (isNew) {
-      setState(s => ({ ...s, documents: [merged, ...s.documents] }));
+      const stillHere = !hotelIds || !hotelIds.length || hotelIds.includes(state.hotelId);
+      if (!stillHere) merged.hotelId = hotelIds[0];
+      if (stillHere) setState(s => ({ ...s, documents: [merged, ...s.documents] }));
       log("doc_create", doc.title);
-      // Multi-hotel new doc: persist row + document_hotels right away (the
-      // debounced diff sync would upsert the row later anyway — idempotent).
-      if (hotelIds && hotelIds.length > 1 && window.DocuApi && !window.DocuApi.offline) {
-        try { await window.DocuApi.regionalCreateDoc(doc, hotelIds, state.hotelId); }
+      // Multi-hotel (or other-hotel-only) new doc: persist row + document_hotels
+      // right away (the debounced diff sync would upsert the row later anyway
+      // when stillHere — idempotent).
+      const needsDirect = hotelIds && hotelIds.length && (hotelIds.length > 1 || !stillHere);
+      if (needsDirect && window.DocuApi && !window.DocuApi.offline) {
+        try { await window.DocuApi.regionalCreateDoc(merged, hotelIds, merged.hotelId); }
         catch (e) { console.error("regionalCreateDoc", e); alert("Error compartiendo en hoteles: " + (e?.message || e)); }
       }
     } else {
-      setState(s => ({ ...s, documents: s.documents.map(d => d.id === doc.id ? merged : d) }));
+      // Re-home: if the owner hotel got unticked, the row moves to one of the
+      // remaining hotels (prefer the one we're standing in).
+      if (hotelIds && hotelIds.length && !hotelIds.includes(merged.hotelId)) {
+        merged.hotelId = hotelIds.includes(state.hotelId) ? state.hotelId : hotelIds[0];
+      }
+      const stillHere = !hotelIds || hotelIds.includes(state.hotelId);
+      if (stillHere) {
+        setState(s => ({ ...s, documents: s.documents.map(d => d.id === doc.id ? merged : d) }));
+      } else {
+        // The doc leaves this hotel: persist the edits directly and drop it
+        // from local state without letting the diff-sync DELETE the row.
+        if (window.DocuApi && !window.DocuApi.offline) {
+          try { await window.DocuApi.saveDocumentRow(merged); }
+          catch (e) { console.error("saveDocumentRow", e); alert("Error guardando el documento: " + (e?.message || e)); }
+        }
+        window.DocuStore.forgetDocument(doc.id);
+        setState(s => ({ ...s, documents: s.documents.filter(d => d.id !== doc.id) }));
+      }
       if (prev.statusId !== doc.statusId) {
         const stOld = statusById[prev.statusId]?.label?.[lang] || "";
         const stNew = statusById[doc.statusId]?.label?.[lang] || "";
@@ -409,6 +430,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title.trim()) { setError(t.common.required); return; }
+    if (hotelPicker && pickedHotels.size === 0) { setError(t.documents.hotelsAtLeastOne); return; }
     const docId = doc?.id || window.DocuStore.uid("doc");
     let fileMeta = file || { name: "documento.pdf", size: 0, dataUrl: null };
     const useBackend = window.DocuApi && !window.DocuApi.offline && state.hotelId;
@@ -551,11 +573,10 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
                 {hotelPicker.hotels.map(h => {
                   const isCurrent = h.id === hotelPicker.currentHotelId;
                   return (
-                    <label key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '2px 4px', cursor: isCurrent ? 'default' : 'pointer' }}>
+                    <label key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '2px 4px', cursor: 'pointer' }}>
                       <input
                         type="checkbox"
                         checked={pickedHotels.has(h.id)}
-                        disabled={isCurrent}
                         onChange={() => setPickedHotels(prev => { const n = new Set(prev); n.has(h.id) ? n.delete(h.id) : n.add(h.id); return n; })}
                       />
                       {h.name}{isCurrent && <span style={{ color: 'var(--muted)', fontSize: 11 }}> ({t.documents.currentHotelTag})</span>}

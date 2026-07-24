@@ -18,15 +18,23 @@ values (
 --   docs/{hotel_id}/{doc_id}/{filename}
 --   requests/{request_id}/{item_id}/{upload_id}_{filename}
 
--- Authenticated users can READ files whose hotel they can access (incl. regional).
+-- Authenticated users can READ files whose hotel they can access (incl. regional),
+-- plus files of docs shared into one of their hotels via document_hotels — those
+-- may live under another hotel's path (regional / re-homed documents).
 drop policy if exists "storage_docs_read" on storage.objects;
 create policy "storage_docs_read" on storage.objects
   for select using (
     bucket_id = 'docuhotel'
     and (
-      -- documents path: docs/{hotel_id}/...
+      -- documents path: docs/{hotel_id}/{doc_id}/...
       (split_part(name, '/', 1) = 'docs'
-        and (user_is_regional() or user_can_access(split_part(name, '/', 2)::uuid)))
+        and (user_is_regional()
+          or user_can_access(split_part(name, '/', 2)::uuid)
+          or exists (
+            select 1 from document_hotels dh
+            where dh.document_id = split_part(name, '/', 3)
+              and user_can_access(dh.hotel_id)
+          )))
       or
       -- request uploads: anyone in the hotel that owns the request
       (split_part(name, '/', 1) = 'requests'

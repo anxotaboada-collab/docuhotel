@@ -587,8 +587,16 @@ function saveStateToBackend(next) {
   }, 600);
 }
 
+// Remove a document from the diff snapshot so dropping it from local state
+// does NOT issue a DELETE on the backend row. Used when a doc is re-homed or
+// unshared from the current hotel but must keep existing in other hotels.
+function forgetDocument(docId) {
+  const p = window.__docuPrevState;
+  if (p?.documents) p.documents = p.documents.filter((d) => d.id !== docId);
+}
+
 window.DocuStore = {
   LS_KEY, defaultState, loadState, saveState,
   loadStateFromBackend, saveStateToBackend,
-  uid, addMonths, daysUntil,
+  uid, addMonths, daysUntil, forgetDocument,
 };
