@@ -447,6 +447,40 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       setUploading(false);
     }
 
+    // The doc's field values, final except for the language-variants map
+    // (filled in below before saving).
+    const base = {
+      id: docId,
+      title: title.trim(),
+      description,
+      categoryId,
+      themeId: themeId || null,
+      statusId,
+      departments: departments.length ? departments : ["*"],
+      responsibleIds,
+      periodId: periodId || null,
+      startDate: new Date(startDate).toISOString(),
+      expiryDate,
+      uploadedBy: doc?.uploadedBy || state.config.currentUserId,
+      uploadedAt: doc?.uploadedAt || new Date().toISOString(),
+      file: fileMeta,
+      defaultLang,
+      version: doc ? doc.version + (doc.title !== title ? 1 : 0) : 1,
+      publicAccess,
+    };
+
+    // The documents row must exist BEFORE any document_files row (FK). For a
+    // new doc it would otherwise only be created later (debounced diff sync /
+    // regional save), so upsert it now with the final field values.
+    if (useBackend && isNew) {
+      try {
+        await window.DocuApi.saveDocumentRow({ ...base, hotelId: state.hotelId });
+      } catch (err) {
+        setError("Error creando el documento: " + (err?.message || err));
+        return;
+      }
+    }
+
     // Upload any newly-attached language variants. Each variant becomes its
     // own row in document_files so the viewer can offer ES/EN/DE/PT buttons.
     // Also keep the "primary" language variant (defaultLang) in sync with the
@@ -482,26 +516,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       setUploading(false);
     }
 
-    const next = {
-      id: docId,
-      title: title.trim(),
-      description,
-      categoryId,
-      themeId: themeId || null,
-      statusId,
-      departments: departments.length ? departments : ["*"],
-      responsibleIds,
-      periodId: periodId || null,
-      startDate: new Date(startDate).toISOString(),
-      expiryDate,
-      uploadedBy: doc?.uploadedBy || state.config.currentUserId,
-      uploadedAt: doc?.uploadedAt || new Date().toISOString(),
-      file: fileMeta,
-      files: nextLangFiles,
-      defaultLang,
-      version: doc ? doc.version + (doc.title !== title ? 1 : 0) : 1,
-      publicAccess,
-    };
+    const next = { ...base, files: nextLangFiles };
     onSave(next, hotelPicker ? Array.from(pickedHotels) : undefined);
   };
 
