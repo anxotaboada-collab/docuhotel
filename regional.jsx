@@ -262,7 +262,8 @@ function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pus
                       )}
                     </div>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-sm btn-ghost" onClick={() => switchHotel(r.hotelId, { editDocId: r.id })} title="Editar (formulario completo + hoteles)">✎ Editar</button>
                     <button className="btn btn-sm btn-ghost" onClick={() => switchHotel(r.hotelIds?.[0] || r.hotelId)} title="Abrir en el hotel">→</button>
                   </td>
                 </tr>

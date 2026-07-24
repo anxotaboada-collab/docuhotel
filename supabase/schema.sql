@@ -53,18 +53,20 @@ $$;
 -- Taxonomies (per-hotel)
 -- ───────────────────────────────────────────────────────────────────
 
+-- GLOBAL taxonomy since 2026-07: one shared category list for every hotel
+-- (hotel_id is legacy, always null now — kept only for old DBs).
 create table if not exists categories (
   id        text primary key,
-  hotel_id  uuid not null references hotels(id) on delete cascade,
+  hotel_id  uuid references hotels(id) on delete cascade,
   name      text not null,
   color     text,          -- optional shaded look: text color…
   bg        text,          -- …and background (same palette as statuses)
   sort      int  not null default 0,
   created_at timestamptz not null default now()
 );
-create index if not exists idx_categories_hotel on categories(hotel_id);
 alter table categories add column if not exists color text;
 alter table categories add column if not exists bg text;
+alter table categories alter column hotel_id drop not null;
 
 -- GLOBAL taxonomy (no hotel_id): document themes ("Temas"). One shared list
 -- for every hotel; any hotel admin/dept_head (or regional) can edit it.
@@ -434,12 +436,43 @@ create policy themes_admin_write on themes
   for all using (current_user_role() in ('admin','dept_head') or user_is_regional())
   with check (current_user_role() in ('admin','dept_head') or user_is_regional());
 
+-- Categories: GLOBAL taxonomy since 2026-07 (like themes). Migration for
+-- existing DBs — dedup per-hotel rows by name, remap documents, detach from
+-- hotels. Idempotent: on an already-global DB every statement is a no-op.
+update categories c
+set color = coalesce(c.color, d.color), bg = coalesce(c.bg, d.bg)
+from categories d
+where lower(btrim(c.name)) = lower(btrim(d.name))
+  and c.id <> d.id and c.color is null and d.color is not null;
+with canon as (
+  select lower(btrim(name)) as key, min(id) as canon_id
+  from categories group by 1
+), map as (
+  select c.id as old_id, canon.canon_id
+  from categories c
+  join canon on lower(btrim(c.name)) = canon.key
+  where c.id <> canon.canon_id
+)
+update documents d set category_id = m.canon_id
+from map m where d.category_id = m.old_id;
+delete from categories c
+using (select lower(btrim(name)) as key, min(id) as canon_id from categories group by 1) k
+where lower(btrim(c.name)) = k.key and c.id <> k.canon_id;
+update categories set hotel_id = null where hotel_id is not null;
+
+drop policy if exists categories_select on categories;
+create policy categories_select on categories for select using (true);
+drop policy if exists categories_admin_write on categories;
+create policy categories_admin_write on categories
+  for all using (current_user_role() in ('admin','dept_head') or user_is_regional())
+  with check (current_user_role() in ('admin','dept_head') or user_is_regional());
+
 -- Generic hotel-scoped policies (same shape repeated)
 do $do$
 declare t text;
 begin
   for t in select unnest(array[
-    'categories','departments','statuses','periods','responsibles',
+    'departments','statuses','periods','responsibles',
     'projects','email_templates','hotel_config'
   ]) loop
     execute format('drop policy if exists %1$I_select on %1$I', t);
@@ -722,10 +755,7 @@ begin
     ('st_pending_'||v_pfx,  v_hotel_id, 'pending',  '#1e3a8a', '#dbeafe', '{"es":"Pendiente de aprobar","en":"Pending approval","de":"Genehmigung ausstehend"}', 2),
     ('st_archived_'||v_pfx, v_hotel_id, 'archived', '#6b6b6b', '#efefee', '{"es":"Descatalogado","en":"Archived","de":"Archiviert"}', 3);
 
-  insert into categories(id, hotel_id, name, sort) values
-    ('cat_oca_'||v_pfx,       v_hotel_id, 'OCA', 0),
-    ('cat_travelife_'||v_pfx, v_hotel_id, 'Travelife', 1),
-    ('cat_prl_'||v_pfx,       v_hotel_id, 'Prevención de riesgos', 2);
+  -- categories are GLOBAL now: nothing to seed per hotel.
 
   insert into departments(id, hotel_id, name, sort) values
     ('dep_housekeeping_'||v_pfx, v_hotel_id, 'Housekeeping', 0),

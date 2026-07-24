@@ -1,6 +1,6 @@
 // Docuhotel — Documents page (list + filters + form)
 
-function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can, viewerUser }) {
+function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can, viewerUser, editDocId, onEditDocHandled }) {
   can = can || (() => true);
   const [filterStatus, setFilterStatus] = React.useState("all"); // all | active | draft | expiring | <statusId>
   const [search, setSearch] = React.useState("");
@@ -19,6 +19,19 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
   const depById = Object.fromEntries(state.departments.map(d => [d.id, d]));
   const respById = Object.fromEntries(state.responsibles.map(r => [r.id, r]));
   const userById = Object.fromEntries(state.users.map(u => [u.id, u]));
+
+  // Regional/master users get the multi-hotel picker inside the form, both
+  // for new documents and when editing (to change where a doc is valid).
+  const hotelPicker = state.config?.isRegional
+    ? { hotels: state.config.accessibleHotels || [], currentHotelId: state.hotelId }
+    : undefined;
+
+  // Deep link from the Regional panel: open a document's editor on arrival.
+  React.useEffect(() => {
+    if (!editDocId) return;
+    const d = state.documents.find(x => x.id === editDocId);
+    if (d) { setEditing(d); onEditDocHandled && onEditDocHandled(); }
+  }, [editDocId, state.documents]);
 
   // Department-scoped visibility (matches the server RLS): admins / "allDepts"
   // see everything; everyone else only sees docs for "*" or one of their depts.
@@ -76,20 +89,41 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
     setFilterStatus("all"); setSearch(""); setFilterCategory(""); setFilterTheme(""); setFilterDepartment(""); setFilterResponsible(""); setFilterDateFrom(""); setFilterDateTo("");
   };
 
-  const handleSave = (doc) => {
-    const isNew = !state.documents.find(d => d.id === doc.id);
+  const handleSave = async (doc, hotelIds) => {
+    const prev = state.documents.find(d => d.id === doc.id);
+    const isNew = !prev;
+    // Preserve fields the form doesn't produce: the owner hotel (so editing a
+    // shared doc from a non-owner hotel never re-homes it) and the hotel list.
+    const merged = {
+      ...doc,
+      hotelId: prev?.hotelId || state.hotelId,
+      sharedHotelIds: hotelIds || prev?.sharedHotelIds || [],
+    };
     if (isNew) {
-      setState(s => ({ ...s, documents: [doc, ...s.documents] }));
+      setState(s => ({ ...s, documents: [merged, ...s.documents] }));
       log("doc_create", doc.title);
+      // Multi-hotel new doc: persist row + document_hotels right away (the
+      // debounced diff sync would upsert the row later anyway — idempotent).
+      if (hotelIds && hotelIds.length > 1 && window.DocuApi && !window.DocuApi.offline) {
+        try { await window.DocuApi.regionalCreateDoc(doc, hotelIds, state.hotelId); }
+        catch (e) { console.error("regionalCreateDoc", e); alert("Error compartiendo en hoteles: " + (e?.message || e)); }
+      }
     } else {
-      const prev = state.documents.find(d => d.id === doc.id);
-      setState(s => ({ ...s, documents: s.documents.map(d => d.id === doc.id ? doc : d) }));
-      if (prev && prev.statusId !== doc.statusId) {
+      setState(s => ({ ...s, documents: s.documents.map(d => d.id === doc.id ? merged : d) }));
+      if (prev.statusId !== doc.statusId) {
         const stOld = statusById[prev.statusId]?.label?.[lang] || "";
         const stNew = statusById[doc.statusId]?.label?.[lang] || "";
         log("doc_status", `${doc.title}: ${stOld} → ${stNew}`);
       } else {
         log("doc_update", doc.title);
+      }
+      const prevHotels = (prev.sharedHotelIds || []).slice().sort().join(",");
+      const nextHotels = (hotelIds || []).slice().sort().join(",");
+      // Skip the no-op case: a plain single-hotel doc that stays single-hotel.
+      const touchesSharing = hotelIds && (hotelIds.length > 1 || (prev.sharedHotelIds || []).length > 0);
+      if (touchesSharing && nextHotels !== prevHotels && window.DocuApi && !window.DocuApi.offline) {
+        try { await window.DocuApi.updateRegionalDocHotels(doc.id, hotelIds); }
+        catch (e) { console.error("updateRegionalDocHotels", e); alert("Error actualizando los hoteles: " + (e?.message || e)); }
       }
     }
     setEditing(null);
@@ -258,6 +292,7 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
           doc={editing.new ? null : editing}
           onSave={handleSave}
           onClose={() => setEditing(null)}
+          hotelPicker={hotelPicker}
         />
       )}
     </div>
@@ -291,7 +326,12 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
   const [pendingLangFiles, setPendingLangFiles] = React.useState({});
   // Already-uploaded language variants (existing keys we keep around).
   const [existingLangs, setExistingLangs] = React.useState(() => doc?.files || {});
-  const [pickedHotels, setPickedHotels] = React.useState(() => new Set(hotelPicker ? [hotelPicker.currentHotelId] : []));
+  const [pickedHotels, setPickedHotels] = React.useState(() => {
+    if (!hotelPicker) return new Set();
+    const init = new Set(doc?.sharedHotelIds || []);
+    init.add(hotelPicker.currentHotelId);
+    return init;
+  });
   const [error, setError] = React.useState("");
   const fileRef = React.useRef();
   const langFileRefs = { es: React.useRef(), en: React.useRef(), de: React.useRef(), pt: React.useRef() };

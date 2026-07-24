@@ -239,7 +239,7 @@
     const _t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
     const _perf = (label) => console.info(`[docuhotel] loadFullState ${label}: ${Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - _t0)}ms`);
     const tables = [
-      "categories","departments","statuses","periods","responsibles",
+      "departments","statuses","periods","responsibles",
       "app_users","documents","projects","email_templates","activity_log","email_log","hotel_config"
     ];
     // activity_log / email_log grow without bound; only the most recent matter.
@@ -250,15 +250,17 @@
       return q;
     });
     // First wave — fire everything that doesn't depend on another query at once.
-    const [results, dhRes, reqRes, themesRes] = await Promise.all([
+    const [results, dhRes, reqRes, themesRes, catsRes] = await Promise.all([
       Promise.all(tableQ),
       // Only the rows that share a document INTO this hotel — not every
       // document_hotels row in the system (RLS already scopes this to hotels
       // the user can access, but a regional admin can access all of them).
       client.from("document_hotels").select("document_id, hotel_id").eq("hotel_id", hotelId),
       client.from("requests").select("*").eq("hotel_id", hotelId),
-      // Themes are a GLOBAL taxonomy (no hotel_id): one list shared by all hotels.
+      // Themes and categories are GLOBAL taxonomies (no hotel scoping): one
+      // shared list for every hotel.
       client.from("themes").select("*").order("sort", { ascending: true }),
+      client.from("categories").select("*").order("name", { ascending: true }),
     ]);
     _perf("wave 1");
     const byTable = Object.fromEntries(tables.map((t, i) => [t, results[i].data || []]));
@@ -316,7 +318,7 @@
     return {
       hotelId,
       statuses:    byTable.statuses.map((s) => ({ id: s.id, key: s.key, color: s.color, bg: s.bg, label: s.label })),
-      categories:  byTable.categories.map((c) => ({ id: c.id, name: c.name, color: c.color || null, bg: c.bg || null })),
+      categories:  (catsRes.data || []).map((c) => ({ id: c.id, name: c.name, color: c.color || null, bg: c.bg || null })),
       themes:      (themesRes.data || []).map((c) => ({ id: c.id, name: c.name, sort: c.sort ?? 0 })),
       departments: byTable.departments.map((d) => ({ id: d.id, name: d.name })),
       periods:     byTable.periods.map((p) => ({ id: p.id, months: p.months, manual: !!p.manual, label: p.label })),
@@ -382,8 +384,8 @@
     const hotelId = next.hotelId;
 
     await Promise.all([
-      persistTable("categories",   hotelId, prev?.categories,   next.categories,   (x, h) => ({ id: x.id, hotel_id: h, name: x.name, color: x.color || null, bg: x.bg || null })),
-      // Global table: no hotel_id column, same rows for every hotel.
+      // Global tables: no hotel scoping, same rows for every hotel.
+      persistTable("categories",   hotelId, prev?.categories,   next.categories,   (x) => ({ id: x.id, name: x.name, color: x.color || null, bg: x.bg || null })),
       persistTable("themes",       hotelId, prev?.themes,       next.themes,       (x) => ({ id: x.id, name: x.name, sort: x.sort ?? 0 })),
       persistTable("departments",  hotelId, prev?.departments,  next.departments,  (x, h) => ({ id: x.id, hotel_id: h, name: x.name })),
       persistTable("statuses",     hotelId, prev?.statuses,     next.statuses,     (x, h) => ({ id: x.id, hotel_id: h, key: x.key, color: x.color, bg: x.bg, label: x.label })),
@@ -701,8 +703,8 @@
     if (!hotelIds || !hotelIds.length) throw new Error("Selecciona al menos un hotel.");
     const owner = ownerHotelId || hotelIds[0];
     const row = docToRow({ ...doc, hotelId: owner }, owner);
-    { const { error } = await client.from("documents").insert(row); if (error) throw error; }
-    { const { error } = await client.from("document_hotels").insert(hotelIds.map((h) => ({ document_id: doc.id, hotel_id: h }))); if (error) throw error; }
+    { const { error } = await client.from("documents").upsert(row, { onConflict: "id" }); if (error) throw error; }
+    { const { error } = await client.from("document_hotels").upsert(hotelIds.map((h) => ({ document_id: doc.id, hotel_id: h })), { onConflict: "document_id,hotel_id" }); if (error) throw error; }
     const { data: { user } = {} } = await client.auth.getUser();
     await client.from("regional_uploads").insert({ document_id: doc.id, uploaded_by: user?.id || null, title: doc.title, hotel_ids: hotelIds });
     return doc.id;

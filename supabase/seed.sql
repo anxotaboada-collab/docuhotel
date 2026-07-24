@@ -44,11 +44,11 @@ begin
     ('st_archived', v_hotel_id, 'archived', '#6b6b6b', '#efefee', '{"es":"Descatalogado","en":"Archived","de":"Archiviert"}', 3)
   on conflict (id) do nothing;
 
-  -- Default categories
-  insert into categories(id, hotel_id, name, sort) values
-    ('cat_oca',       v_hotel_id, 'OCA', 0),
-    ('cat_travelife', v_hotel_id, 'Travelife', 1),
-    ('cat_prl',       v_hotel_id, 'Prevención de riesgos', 2)
+  -- Default categories (GLOBAL taxonomy: no hotel_id, shared by every hotel)
+  insert into categories(id, name, sort) values
+    ('cat_oca',       'OCA', 0),
+    ('cat_travelife', 'Travelife', 1),
+    ('cat_prl',       'Prevención de riesgos', 2)
   on conflict (id) do nothing;
 
   -- Default departments

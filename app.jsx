@@ -165,12 +165,18 @@ function App() {
   }, [useBackend, isPublicRoute, bootRetry]);
 
   // Switch to another hotel the user can access (regional / multi-hotel).
-  const switchHotel = async (hid) => {
-    if (!useBackend || !hid || hid === state?.hotelId) return;
+  // opts.editDocId: open that document's editor on arrival (Regional panel).
+  const [pendingEditDocId, setPendingEditDocId] = React.useState(null);
+  const switchHotel = async (hid, opts) => {
+    if (!useBackend || !hid) return;
+    if (hid === state?.hotelId) {
+      if (opts?.editDocId) { setPendingEditDocId(opts.editDocId); setTab("documents"); }
+      return;
+    }
     setBootError(""); setBootStatus("loading");
     try {
       const next = await withTimeout(window.DocuStore.loadStateFromBackend(hid), 60000, "loadState");
-      if (next) { setTab("documents"); setStateRaw(next); setBootStatus("ready"); }
+      if (next) { setTab("documents"); if (opts?.editDocId) setPendingEditDocId(opts.editDocId); setStateRaw(next); setBootStatus("ready"); }
       else { setBootError("No se pudo cargar ese hotel."); setBootStatus("error"); }
     } catch (e) {
       setBootError(e?.message || "Error al cambiar de hotel."); setBootStatus("error");
@@ -399,6 +405,7 @@ function App() {
           <DocumentsPage
             state={state} setState={setState} t={t} lang={lang}
             openViewer={openViewer} log={log} density={tweaks.density} can={can} viewerUser={currentUser}
+            editDocId={pendingEditDocId} onEditDocHandled={() => setPendingEditDocId(null)}
           />
         )}
         {effectiveTab === "log" && <LogPage state={state} t={t} lang={lang} />}
