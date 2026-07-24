@@ -24,7 +24,7 @@ function RegionalPanel({ state, setState, t, lang, switchHotel, pushToast }) {
       </div>
       {section === "newhotel" && <RegionalNewHotel switchHotel={switchHotel} pushToast={pushToast} />}
       {section === "upload" && <RegionalUpload state={state} setState={setState} t={t} lang={lang} hotels={hotels} pushToast={pushToast} onDone={() => setSection("registry")} />}
-      {section === "documents" && <RegionalAllDocuments state={state} hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} pushToast={pushToast} />}
+      {section === "documents" && <RegionalAllDocuments state={state} setState={setState} hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} pushToast={pushToast} />}
       {section === "registry" && <RegionalRegistry hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} />}
       {section === "users" && <RegionalUsers hotels={hotels} hotelName={hotelName} pushToast={pushToast} />}
     </div>
@@ -32,7 +32,7 @@ function RegionalPanel({ state, setState, t, lang, switchHotel, pushToast }) {
 }
 
 // ── Mirror of every document across every hotel, with filters ─────────
-function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pushToast }) {
+function RegionalAllDocuments({ state, setState, hotels, hotelName, switchHotel, lang, pushToast }) {
   const [rows, setRows] = React.useState(null);
   const [search, setSearch] = React.useState("");
   const [filterHotel, setFilterHotel] = React.useState("");
@@ -115,6 +115,35 @@ function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pus
 
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString(lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "en-GB", { year: "numeric", month: "short", day: "2-digit" }) : "—";
 
+  // Toggle a hotel checkbox for a document, saving instantly. If the owner
+  // hotel is unticked, the row is re-homed to another ticked hotel first.
+  const [busyToggle, setBusyToggle] = React.useState(null); // "docId:hotelId" while saving
+  const toggleDocHotel = async (r, hid) => {
+    const cur = new Set(r.hotelIds && r.hotelIds.length ? r.hotelIds : [r.hotelId]);
+    const isRemove = cur.has(hid);
+    if (isRemove && cur.size <= 1) { pushToast && pushToast("⚠ Debe quedar al menos un hotel"); return; }
+    if (isRemove) cur.delete(hid); else cur.add(hid);
+    const next = Array.from(cur);
+    const newOwner = (isRemove && hid === r.hotelId) ? next[0] : r.hotelId;
+    setBusyToggle(r.id + ":" + hid);
+    try {
+      if (newOwner !== r.hotelId) await window.DocuApi.rehomeDocument(r.id, newOwner);
+      await window.DocuApi.updateRegionalDocHotels(r.id, next);
+      setRows(rs => rs.map(x => x.id === r.id ? { ...x, hotelIds: next, hotelId: newOwner } : x));
+      // Keep the currently-loaded hotel's local list coherent when it's the
+      // one being unticked (without letting the diff-sync delete the row).
+      if (isRemove && hid === state.hotelId && setState) {
+        window.DocuStore.forgetDocument(r.id);
+        setState(s => ({ ...s, documents: s.documents.filter(d => d.id !== r.id) }));
+      }
+      pushToast && pushToast(isRemove ? `✓ "${r.title}" quitado de ${hotelName(hid)}` : `✓ "${r.title}" añadido a ${hotelName(hid)}`);
+    } catch (e) {
+      console.error(e);
+      pushToast && pushToast("⚠ No se pudo guardar: " + (e?.message || e));
+      reload();
+    } finally { setBusyToggle(null); }
+  };
+
   const downloadVariant = async (r, lc) => {
     if (!window.DocuApi || window.DocuApi.offline) return;
     let key = null, name = null;
@@ -146,7 +175,8 @@ function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pus
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
         <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
-          Vista corporativa de TODOS los documentos. Una fila por documento, con los hoteles donde está activo y los idiomas disponibles.
+          Vista corporativa de TODOS los documentos. Marca o desmarca las casillas de hoteles para activar
+          o quitar cada documento en cada club — se guarda al instante (debe quedar al menos un hotel).
         </p>
         <button className="btn btn-sm btn-ghost" onClick={reload}>↻ Actualizar</button>
       </div>
@@ -203,7 +233,7 @@ function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pus
               <th>Estado</th>
               <th>Caducidad</th>
               <th>Idiomas</th>
-              <th>Hoteles</th>
+              <th>Hoteles (marca / desmarca)</th>
               <th style={{ width: 90 }}></th>
             </tr>
           </thead>
@@ -247,19 +277,21 @@ function RegionalAllDocuments({ state, hotels, hotelName, switchHotel, lang, pus
                     </div>
                   </td>
                   <td>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                      {(r.hotelIds || []).slice(0, 6).map(hid => (
-                        <button
-                          key={hid}
-                          type="button"
-                          onClick={() => switchHotel(hid)}
-                          title={`Entrar en ${hotelName(hid)}`}
-                          style={{ fontSize: 11, padding: '2px 6px', border: '1px solid var(--line)', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
-                        >🏨 {hotelName(hid)}</button>
-                      ))}
-                      {(r.hotelIds || []).length > 6 && (
-                        <span style={{ fontSize: 11, color: 'var(--muted)' }}>+{r.hotelIds.length - 6}</span>
-                      )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "2px 8px", minWidth: 170 }}>
+                      {hotels.map(h => {
+                        const on = (r.hotelIds || []).includes(h.id);
+                        const busy = busyToggle === r.id + ":" + h.id;
+                        return (
+                          <label
+                            key={h.id}
+                            title={h.id === r.hotelId ? "Hotel propietario (si lo desmarcas, el documento pasa a otro hotel marcado)" : (on ? "Desmarcar para quitarlo de este hotel" : "Marcar para activarlo en este hotel")}
+                            style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.45 : 1, color: on ? "var(--ink)" : "var(--muted)", whiteSpace: "nowrap" }}
+                          >
+                            <input type="checkbox" checked={on} disabled={busy} onChange={() => toggleDocHotel(r, h.id)} />
+                            {h.name}
+                          </label>
+                        );
+                      })}
                     </div>
                   </td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

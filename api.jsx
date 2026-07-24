@@ -710,6 +710,14 @@
     return doc.id;
   }
 
+  // Move a document's row to another hotel (when its owner hotel is unticked).
+  // Only touches hotel_id — every other field stays as-is.
+  async function rehomeDocument(docId, hotelId) {
+    if (offline) return;
+    const { error } = await client.from("documents").update({ hotel_id: hotelId }).eq("id", docId);
+    if (error) throw error;
+  }
+
   // Direct upsert of one document row (bypasses the debounced state diff).
   // Used when the edited doc no longer belongs to the current hotel's local
   // state (re-homed to another hotel or unshared from this one).
@@ -836,7 +844,7 @@
     uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
-    createHotel, listAccessibleHotels, regionalCreateDoc, saveDocumentRow, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
+    createHotel, listAccessibleHotels, regionalCreateDoc, saveDocumentRow, rehomeDocument, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
     // Exposed so the public-route bootstrap (audit_project RPC, etc.) can
