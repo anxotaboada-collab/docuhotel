@@ -264,7 +264,11 @@ function DocumentsPage({ state, setState, t, lang, openViewer, log, density, can
   );
 }
 
-function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initialTitle }) {
+// hotelPicker (optional, regional panel): { hotels: [{id,name}], currentHotelId }.
+// When present, the form shows hotel checkboxes and onSave receives the picked
+// hotel ids as a second argument. The current hotel stays always selected —
+// the document row lives there.
+function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initialTitle, hotelPicker }) {
   const isNew = !doc;
   const [title, setTitle] = React.useState(doc?.title || initialTitle || "");
   const [description, setDescription] = React.useState(doc?.description || "");
@@ -287,6 +291,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
   const [pendingLangFiles, setPendingLangFiles] = React.useState({});
   // Already-uploaded language variants (existing keys we keep around).
   const [existingLangs, setExistingLangs] = React.useState(() => doc?.files || {});
+  const [pickedHotels, setPickedHotels] = React.useState(() => new Set(hotelPicker ? [hotelPicker.currentHotelId] : []));
   const [error, setError] = React.useState("");
   const fileRef = React.useRef();
   const langFileRefs = { es: React.useRef(), en: React.useRef(), de: React.useRef(), pt: React.useRef() };
@@ -435,7 +440,7 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
       version: doc ? doc.version + (doc.title !== title ? 1 : 0) : 1,
       publicAccess,
     };
-    onSave(next);
+    onSave(next, hotelPicker ? Array.from(pickedHotels) : undefined);
   };
 
   const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(0)} KB` : `${(b/1024/1024).toFixed(1)} MB`;
@@ -488,6 +493,39 @@ function DocumentForm({ state, t, lang, doc, onSave, onClose, initialFile, initi
             <ToggleChips items={state.departments} value={departments} onChange={setDepartments} getLabel={d => d.name} allowAll />
             <span className="help">{t.documents.visibilityHelp}</span>
           </div>
+          {hotelPicker && (
+            <div className="field full">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label>🏨 {t.documents.hotelsField} *</label>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setPickedHotels(
+                    pickedHotels.size === hotelPicker.hotels.length
+                      ? new Set([hotelPicker.currentHotelId])
+                      : new Set(hotelPicker.hotels.map(h => h.id))
+                  )}
+                >{pickedHotels.size === hotelPicker.hotels.length ? t.documents.hotelsNone : t.documents.hotelsAll}</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6, border: '1px solid var(--line)', borderRadius: 8, padding: 10, maxHeight: 220, overflow: 'auto' }}>
+                {hotelPicker.hotels.map(h => {
+                  const isCurrent = h.id === hotelPicker.currentHotelId;
+                  return (
+                    <label key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '2px 4px', cursor: isCurrent ? 'default' : 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={pickedHotels.has(h.id)}
+                        disabled={isCurrent}
+                        onChange={() => setPickedHotels(prev => { const n = new Set(prev); n.has(h.id) ? n.delete(h.id) : n.add(h.id); return n; })}
+                      />
+                      {h.name}{isCurrent && <span style={{ color: 'var(--muted)', fontSize: 11 }}> ({t.documents.currentHotelTag})</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              <span className="help">{t.documents.hotelsHelp} · {pickedHotels.size} {t.documents.hotelsSelected}</span>
+            </div>
+          )}
           <div className="field full">
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13.5, color: 'var(--ink)', cursor: 'pointer' }}>
               <input type="checkbox" checked={publicAccess} onChange={e => setPublicAccess(e.target.checked)} />

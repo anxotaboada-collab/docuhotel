@@ -2,7 +2,7 @@
 // Lets a regional admin: upload one corporate document into many hotels at once,
 // see the registry of regional uploads, and manage which hotels each user can access.
 
-function RegionalPanel({ state, t, lang, switchHotel, pushToast }) {
+function RegionalPanel({ state, setState, t, lang, switchHotel, pushToast }) {
   const [section, setSection] = React.useState("upload");
   const hotels = state.config?.accessibleHotels || [];
   const hotelName = (id) => hotels.find(h => h.id === id)?.name || id;
@@ -23,7 +23,7 @@ function RegionalPanel({ state, t, lang, switchHotel, pushToast }) {
         <button className={`btn btn-sm ${section === "users" ? "btn-primary" : "btn-ghost"}`} onClick={() => setSection("users")}>Usuarios y hoteles</button>
       </div>
       {section === "newhotel" && <RegionalNewHotel switchHotel={switchHotel} pushToast={pushToast} />}
-      {section === "upload" && <RegionalUpload state={state} hotels={hotels} pushToast={pushToast} onDone={() => setSection("registry")} />}
+      {section === "upload" && <RegionalUpload state={state} setState={setState} t={t} lang={lang} hotels={hotels} pushToast={pushToast} onDone={() => setSection("registry")} />}
       {section === "documents" && <RegionalAllDocuments state={state} hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} pushToast={pushToast} />}
       {section === "registry" && <RegionalRegistry hotels={hotels} hotelName={hotelName} switchHotel={switchHotel} lang={lang} />}
       {section === "users" && <RegionalUsers hotels={hotels} hotelName={hotelName} pushToast={pushToast} />}
@@ -323,104 +323,50 @@ function RegionalNewHotel({ switchHotel, pushToast }) {
   );
 }
 
-// ── Upload one document into N hotels (single synchronized row) ────────
-function RegionalUpload({ state, hotels, pushToast, onDone }) {
-  const [title, setTitle] = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [publicAccess, setPublicAccess] = React.useState(false);
-  const [pickedHotels, setPickedHotels] = React.useState(() => new Set());
-  const [pendingFile, setPendingFile] = React.useState(null);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState("");
-  const fileRef = React.useRef();
+// ── Upload one document into N hotels (single synchronized row). Reuses the
+// full per-hotel DocumentForm (category, theme, expiry, AI autofill, language
+// variants…) with the hotel checkboxes added via the hotelPicker prop. ─────
+function RegionalUpload({ state, setState, t, lang, hotels, pushToast, onDone }) {
+  const [open, setOpen] = React.useState(true);
+  const currentHotelName = (hotels.find(h => h.id === state.hotelId) || {}).name || "—";
 
-  const toggleHotel = (id) => setPickedHotels(prev => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
-  });
-  const allOn = hotels.length > 0 && pickedHotels.size === hotels.length;
-  const toggleAll = () => setPickedHotels(allOn ? new Set() : new Set(hotels.map(h => h.id)));
-
-  const onPickFile = (f) => {
-    setError("");
-    if (!f) return;
-    if (f.type && f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) { setError("Solo se admiten archivos PDF."); return; }
-    if (f.size > 25 * 1024 * 1024) { setError("El archivo supera los 25 MB."); return; }
-    setPendingFile(f);
-  };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError("");
-    if (!title.trim()) { setError("Pon un título."); return; }
-    if (pickedHotels.size === 0) { setError("Selecciona al menos un hotel."); return; }
-    setBusy(true);
+  const handleSave = async (doc, hotelIds) => {
     try {
-      const fields = {
-        title: title.trim(),
-        description,
-        statusId: state.statuses.find(s => s.key === "active")?.id || state.statuses[0]?.id || null,
-        periodId: state.periods.find(p => p.manual)?.id || state.periods[0]?.id || null,
-        categoryId: null,
-        startDate: new Date().toISOString(),
-        expiryDate: null,
-        publicAccess,
-      };
-      await window.DocuApi.regionalUpload({ file: pendingFile, fields, hotelIds: Array.from(pickedHotels) });
-      pushToast && pushToast(`✓ Documento creado en ${pickedHotels.size} hotel(es)`);
-      setTitle(""); setDescription(""); setPublicAccess(false); setPickedHotels(new Set()); setPendingFile(null);
-      if (fileRef.current) fileRef.current.value = "";
+      await window.DocuApi.regionalCreateDoc(doc, hotelIds, state.hotelId);
+      // Mirror it into the current hotel's local list so it shows up in
+      // "Documentos" without a reload (the row lives in this hotel).
+      setState && setState(s => ({ ...s, documents: [{ ...doc, hotelId: s.hotelId, sharedHotelIds: hotelIds }, ...s.documents] }));
+      pushToast && pushToast(`✓ "${doc.title}" creado en ${hotelIds.length} hotel(es)`);
+      setOpen(false);
       onDone && onDone();
     } catch (err) {
-      setError("No se pudo crear: " + (err?.message || err));
-    } finally {
-      setBusy(false);
+      pushToast && pushToast("⚠ No se pudo crear: " + (err?.message || err));
     }
   };
 
   return (
-    <form onSubmit={submit} style={{ maxWidth: 720, display: "flex", flexDirection: "column", gap: 14 }}>
-      <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
-        Sube un PDF una sola vez y elige en qué hoteles debe quedar activo. Es <strong>un único documento</strong> sincronizado:
-        si lo descatalogas, cambia para todos los hoteles seleccionados. No se duplica.
+    <div style={{ maxWidth: 720 }}>
+      <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 13 }}>
+        Mismo formulario completo que "Nuevo documento" (categoría, tema, caducidad, autorrelleno con IA, idiomas…)
+        más la lista de hoteles donde debe ser válido. Es <strong>un único documento</strong> sincronizado:
+        si lo cambias o descatalogas, cambia para todos los hoteles marcados. No se duplica.
+        Se crea desde el hotel actual (🏨 {currentHotelName}), que queda siempre incluido — cambia de hotel arriba si quieres otro como base.
       </p>
-      <label style={{ display: "grid", gap: 4 }}>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>Título *</span>
-        <input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Política de seguridad alimentaria 2026" />
-      </label>
-      <label style={{ display: "grid", gap: 4 }}>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>Descripción</span>
-        <textarea className="input" rows={2} value={description} onChange={e => setDescription(e.target.value)} />
-      </label>
-      <label style={{ display: "grid", gap: 4 }}>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>Archivo PDF</span>
-        <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={e => onPickFile(e.target.files?.[0])} />
-        {pendingFile && <span style={{ fontSize: 12, color: "var(--muted)" }}>{pendingFile.name} ({(pendingFile.size/1024/1024).toFixed(2)} MB)</span>}
-      </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-        <input type="checkbox" checked={publicAccess} onChange={e => setPublicAccess(e.target.checked)} />
-        Visible también en la vista pública / QR de cada hotel
-      </label>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>Hoteles donde debe estar activo *</span>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={toggleAll}>{allOn ? "Ninguno" : "Todos"}</button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 6, border: "1px solid var(--line)", borderRadius: 8, padding: 10, maxHeight: 260, overflow: "auto" }}>
-          {hotels.length === 0 && <span style={{ fontSize: 13, color: "var(--muted)" }}>No tienes hoteles accesibles.</span>}
-          {hotels.map(h => (
-            <label key={h.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "4px 6px", borderRadius: 6, background: pickedHotels.has(h.id) ? "var(--bg-soft)" : "transparent" }}>
-              <input type="checkbox" checked={pickedHotels.has(h.id)} onChange={() => toggleHotel(h.id)} />
-              🏨 {h.name}
-            </label>
-          ))}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{pickedHotels.size} seleccionado(s)</div>
-      </div>
-      {error && <div style={{ color: "var(--danger, #b91c1c)", background: "var(--danger-bg, #fee2e2)", padding: 8, borderRadius: 6, fontSize: 13 }}>{error}</div>}
-      <div>
-        <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Creando…" : "Crear documento regional"}</button>
-      </div>
-    </form>
+      {!open && (
+        <button className="btn btn-primary" onClick={() => setOpen(true)}>➕ Nuevo documento regional</button>
+      )}
+      {open && (
+        <window.DocumentForm
+          state={state}
+          t={t}
+          lang={lang}
+          doc={null}
+          onSave={handleSave}
+          onClose={() => setOpen(false)}
+          hotelPicker={{ hotels, currentHotelId: state.hotelId }}
+        />
+      )}
+    </div>
   );
 }
 

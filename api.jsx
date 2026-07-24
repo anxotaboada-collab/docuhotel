@@ -691,38 +691,21 @@
     return (data || []).map((h) => ({ id: h.id, name: h.name, country: h.country, timezone: h.timezone, publicToken: h.public_token }));
   }
 
-  // Upload a single regional/corporate document visible in all given hotels.
-  async function regionalUpload({ file, fields, hotelIds }) {
+  // Create a regional/corporate document from a full DocumentForm payload
+  // (same camelCase doc object the per-hotel form produces; files were already
+  // uploaded to storage by the form) and share it into every given hotel via
+  // document_hotels. One single row — no duplication. The row lives in the
+  // owner hotel, so the owner must be one of the shared hotels.
+  async function regionalCreateDoc(doc, hotelIds, ownerHotelId) {
     if (offline) throw new Error("offline mode");
     if (!hotelIds || !hotelIds.length) throw new Error("Selecciona al menos un hotel.");
-    const { data: { user } = {} } = await client.auth.getUser();
-    const docId = "doc_reg_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const ownerHotel = hotelIds[0];
-    let fileMeta = null;
-    if (file) {
-      file = await window.DocuCompress.compressForUpload(file);
-      const safe = file.name.replace(/[^\w.\-]+/g, "_");
-      const key = `docs/${ownerHotel}/${docId}/${Date.now()}_${safe}`;
-      const { error } = await client.storage.from(cfg.storageBucket || "docuhotel").upload(key, file, {
-        cacheControl: "3600", upsert: false, contentType: file.type || "application/pdf",
-      });
-      if (error) throw error;
-      fileMeta = { key, name: file.name, size: file.size, mime: file.type };
-    }
-    const row = {
-      id: docId, hotel_id: ownerHotel,
-      title: fields.title, description: fields.description || "",
-      category_id: fields.categoryId || null, theme_id: fields.themeId || null, status_id: fields.statusId || null, period_id: fields.periodId || null,
-      departments: ["*"], responsible_ids: [],
-      start_date: fields.startDate || null, expiry_date: fields.expiryDate || null,
-      version: 1, public_access: !!fields.publicAccess, linked_doc_ids: [],
-      file_key: fileMeta?.key || null, file_name: fileMeta?.name || null, file_size: fileMeta?.size || null, file_mime: fileMeta?.mime || null,
-      uploaded_by: user?.id || null, uploaded_at: new Date().toISOString(),
-    };
+    const owner = ownerHotelId || hotelIds[0];
+    const row = docToRow({ ...doc, hotelId: owner }, owner);
     { const { error } = await client.from("documents").insert(row); if (error) throw error; }
-    { const { error } = await client.from("document_hotels").insert(hotelIds.map((h) => ({ document_id: docId, hotel_id: h }))); if (error) throw error; }
-    await client.from("regional_uploads").insert({ document_id: docId, uploaded_by: user?.id || null, title: fields.title, hotel_ids: hotelIds });
-    return docId;
+    { const { error } = await client.from("document_hotels").insert(hotelIds.map((h) => ({ document_id: doc.id, hotel_id: h }))); if (error) throw error; }
+    const { data: { user } = {} } = await client.auth.getUser();
+    await client.from("regional_uploads").insert({ document_id: doc.id, uploaded_by: user?.id || null, title: doc.title, hotel_ids: hotelIds });
+    return doc.id;
   }
 
   async function updateRegionalDocHotels(docId, hotelIds) {
@@ -842,7 +825,7 @@
     uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
-    createHotel, listAccessibleHotels, regionalUpload, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
+    createHotel, listAccessibleHotels, regionalCreateDoc, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
     // Exposed so the public-route bootstrap (audit_project RPC, etc.) can
