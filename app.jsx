@@ -376,21 +376,12 @@ function App() {
             <button key={l} className={l === lang ? "active" : ""} onClick={() => setLang(l)}>{l}</button>
           ))}
         </div>
-        <div
-          className="user-chip"
-          title={useBackend ? `${currentUser?.email || ""} — clic para cerrar sesión` : currentUser?.email}
-          onClick={() => {
-            if (isImpersonating) { setImpersonateId(null); return; }
-            if (!useBackend) return;
-            if (confirm("¿Cerrar sesión?")) {
-              window.DocuApi.signOut().then(() => location.reload());
-            }
-          }}
-          style={(useBackend || isImpersonating) ? { cursor: "pointer" } : undefined}
-        >
-          <span className="avatar">{(currentUser?.name || "?").split(" ").map(p => p[0]).slice(0,2).join("")}</span>
-          <span>{currentUser?.name}</span>
-        </div>
+        <UserMenu
+          currentUser={currentUser}
+          useBackend={useBackend}
+          isImpersonating={isImpersonating}
+          onExitImpersonate={() => setImpersonateId(null)}
+        />
       </header>
 
       {isImpersonating && (

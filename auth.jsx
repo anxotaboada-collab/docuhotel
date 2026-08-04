@@ -140,6 +140,173 @@ function ErrorScreen({ message, onRetry, onSignOut }) {
   );
 }
 
+// ── Cambiar contraseña ──────────────────────────────────────────────
+// La cuenta es única para todas las webapps (mismo proyecto Supabase):
+// cambiarla aquí la cambia en todas.
+
+function passwordErrorText(err) {
+  const m = (err && err.message) || "";
+  if (/leak|pwned|breach|weak/i.test(m)) return "Esa contraseña aparece en filtraciones de datos conocidas. Elige otra diferente.";
+  if (/at least|length|short/i.test(m)) return "La contraseña es demasiado corta.";
+  if (/different from the old|same password/i.test(m)) return "La nueva contraseña no puede ser igual a la actual.";
+  return m || "No se pudo cambiar la contraseña.";
+}
+
+function ChangePasswordModal({ email, onClose }) {
+  const [current, setCurrent] = React.useState("");
+  const [next, setNext] = React.useState("");
+  const [repeat, setRepeat] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [done, setDone] = React.useState(false);
+
+  const inputStyle = { padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", width: "100%", boxSizing: "border-box" };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (next.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
+    if (next !== repeat) { setError("Las contraseñas nuevas no coinciden."); return; }
+    if (next === current) { setError("La nueva contraseña no puede ser igual a la actual."); return; }
+    setLoading(true);
+    try {
+      try {
+        await window.DocuApi.signIn(email, current);
+      } catch (err) {
+        setError("La contraseña actual no es correcta."); setLoading(false); return;
+      }
+      const { error: upErr } = await window.DocuApi.client.auth.updateUser({ password: next });
+      if (upErr) { setError(passwordErrorText(upErr)); setLoading(false); return; }
+      setDone(true);
+    } catch (err) {
+      setError(passwordErrorText(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "grid", placeItems: "center", zIndex: 200, padding: 16 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form onSubmit={submit} style={{
+        background: "var(--surface, #fff)", padding: 28, borderRadius: 12,
+        width: "100%", maxWidth: 400,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.12)",
+        display: "flex", flexDirection: "column", gap: 12,
+      }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Cambiar contraseña</h2>
+        {done ? (
+          <React.Fragment>
+            <div style={{ color: "#166534", fontSize: 14, background: "#dcfce7", padding: 10, borderRadius: 6 }}>
+              ✓ Contraseña actualizada. El cambio aplica a todas las webapps (Docuhotel, EcoTrack, Subsana…).
+            </div>
+            <button type="button" onClick={onClose} style={{
+              padding: "10px 14px", borderRadius: 8, border: "none",
+              background: "#111", color: "#fff", fontWeight: 600, cursor: "pointer",
+            }}>Cerrar</button>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <p style={{ margin: 0, color: "#666", fontSize: 13 }}>
+              La cuenta es la misma en todas las webapps: al cambiarla aquí, cambia en todas.
+            </p>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, color: "#444" }}>Contraseña actual</span>
+              <input type="password" required autoFocus autoComplete="current-password"
+                value={current} onChange={(e) => setCurrent(e.target.value)} style={inputStyle} />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, color: "#444" }}>Nueva contraseña (mínimo 8 caracteres)</span>
+              <input type="password" required autoComplete="new-password"
+                value={next} onChange={(e) => setNext(e.target.value)} style={inputStyle} />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, color: "#444" }}>Repite la nueva contraseña</span>
+              <input type="password" required autoComplete="new-password"
+                value={repeat} onChange={(e) => setRepeat(e.target.value)} style={inputStyle} />
+            </label>
+            {error && (
+              <div style={{ color: "#b91c1c", fontSize: 13, background: "#fee2e2", padding: 8, borderRadius: 6 }}>
+                {error}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="submit" disabled={loading} style={{
+                padding: "10px 14px", borderRadius: 8, border: "none", flex: 1,
+                background: "#111", color: "#fff", fontWeight: 600, cursor: "pointer",
+                opacity: loading ? 0.6 : 1,
+              }}>{loading ? "Guardando…" : "Cambiar contraseña"}</button>
+              <button type="button" onClick={onClose} style={{
+                padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd",
+                background: "#fff", color: "#111", cursor: "pointer",
+              }}>Cancelar</button>
+            </div>
+          </React.Fragment>
+        )}
+      </form>
+    </div>
+  );
+}
+
+// Chip de usuario del header con menú: cambiar contraseña / cerrar sesión.
+function UserMenu({ currentUser, useBackend, isImpersonating, onExitImpersonate }) {
+  const [open, setOpen] = React.useState(false);
+  const [showPass, setShowPass] = React.useState(false);
+
+  const itemStyle = {
+    display: "block", width: "100%", textAlign: "left", padding: "9px 14px",
+    background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#222",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        className="user-chip"
+        title={useBackend ? `${currentUser?.email || ""}` : currentUser?.email}
+        onClick={() => {
+          if (isImpersonating) { onExitImpersonate(); return; }
+          if (!useBackend) return;
+          setOpen((o) => !o);
+        }}
+        style={(useBackend || isImpersonating) ? { cursor: "pointer" } : undefined}
+      >
+        <span className="avatar">{(currentUser?.name || "?").split(" ").map(p => p[0]).slice(0, 2).join("")}</span>
+        <span>{currentUser?.name}</span>
+      </div>
+      {open && (
+        <React.Fragment>
+          <div style={{ position: "fixed", inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 91,
+            background: "var(--surface, #fff)", borderRadius: 10, minWidth: 190,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.14)",
+            border: "1px solid #eee", overflow: "hidden", padding: "4px 0",
+          }}>
+            <div style={{ padding: "8px 14px 6px", fontSize: 12, color: "#888", borderBottom: "1px solid #f0f0f0" }}>
+              {currentUser?.email}
+            </div>
+            <button type="button" style={itemStyle} onClick={() => { setOpen(false); setShowPass(true); }}>
+              🔑 Cambiar contraseña
+            </button>
+            <button type="button" style={{ ...itemStyle, color: "#b91c1c" }} onClick={() => {
+              setOpen(false);
+              if (confirm("¿Cerrar sesión?")) window.DocuApi.signOut().then(() => location.reload());
+            }}>
+              ⎋ Cerrar sesión
+            </button>
+          </div>
+        </React.Fragment>
+      )}
+      {showPass && <ChangePasswordModal email={currentUser?.email} onClose={() => setShowPass(false)} />}
+    </div>
+  );
+}
+
 window.LoginForm = LoginForm;
 window.LoadingScreen = LoadingScreen;
 window.ErrorScreen = ErrorScreen;
+window.ChangePasswordModal = ChangePasswordModal;
+window.PasswordErrorText = passwordErrorText;
+window.UserMenu = UserMenu;
