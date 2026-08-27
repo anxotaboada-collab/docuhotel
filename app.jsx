@@ -113,7 +113,12 @@ function App() {
     // show either a login-screen flash or a stuck spinner.
     if (typeof window !== "undefined" && window.__DOCU_HUB_HANDOFF__) {
       setBootStatus("loading");
-      return;
+      // Si el traspaso se rinde (api.jsx suelta la bandera y avisa), hay que
+      // volver a arrancar a mano: este efecto no se reejecuta solo porque sus
+      // dependencias no cambian, y el usuario se quedaba mirando el spinner.
+      const onAbort = () => setBootRetry((n) => n + 1);
+      window.addEventListener("docu-handoff-abort", onAbort, { once: true });
+      return () => window.removeEventListener("docu-handoff-abort", onAbort);
     }
     let cancelled = false;
     const boot = async () => {

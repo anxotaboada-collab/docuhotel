@@ -78,9 +78,17 @@ function LoginForm({ onSignedIn }) {
   );
 }
 
-function LoadingScreen({ label }) {
+// Pasados unos segundos el spinner deja de ser información y pasa a ser una
+// trampa: si el arranque se atasca (traspaso de sesión del hub que no vuelve,
+// GoTrue lento), sin esta salida el único remedio era vaciar el navegador.
+function LoadingScreen({ label, escapeAfter = 20 }) {
+  const [stuck, setStuck] = React.useState(false);
+  React.useEffect(() => {
+    const t = setTimeout(() => setStuck(true), escapeAfter * 1000);
+    return () => clearTimeout(t);
+  }, [escapeAfter]);
   return (
-    <div className="app" style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+    <div className="app" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
       <div style={{ textAlign: "center", color: "#666" }}>
         <div style={{
           width: 32, height: 32, borderRadius: "50%",
@@ -88,6 +96,24 @@ function LoadingScreen({ label }) {
           margin: "0 auto 12px", animation: "spin 0.9s linear infinite",
         }} />
         <div>{label || "Cargando…"}</div>
+        {stuck && (
+          <div style={{ marginTop: 18, fontSize: 13.5, lineHeight: 1.6, maxWidth: 360 }}>
+            <div style={{ color: "#8a8f98" }}>Esto está tardando más de lo normal.</div>
+            <button
+              className="btn"
+              style={{ marginTop: 10 }}
+              onClick={() => {
+                // Tira la sesión a medias y vuelve al login con la URL limpia.
+                try {
+                  Object.keys(localStorage)
+                    .filter((k) => k.startsWith("sb-") || k.indexOf("supabase.auth") >= 0)
+                    .forEach((k) => localStorage.removeItem(k));
+                } catch (_e) { /* modo privado */ }
+                window.location.replace(window.location.pathname);
+              }}
+            >Entrar con usuario y contraseña</button>
+          </div>
+        )}
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>

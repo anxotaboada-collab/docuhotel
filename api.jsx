@@ -62,12 +62,31 @@
       // Mark that we're handling a hub handoff so the rest of the bundle can
       // short-circuit and avoid a flash of the login screen.
       window.__DOCU_HUB_HANDOFF__ = true;
+      // Perro guardián: si setSession no vuelve (GoTrue lento, refresh token ya
+      // rotado por otra app, cerrojo de supabase-js), la bandera se queda puesta
+      // y app.jsx deja el spinner de "Cargando datos del hotel…" para siempre,
+      // porque ese camino no reintenta nunca. A los 12 s se suelta la bandera y
+      // se sigue con el arranque normal: o hay sesión, o sale el login.
+      let settled = false;
+      const giveUp = setTimeout(() => {
+        if (settled) return;
+        console.warn("Hub SSO setSession no respondió a tiempo; sigo sin traspaso.");
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+        window.__DOCU_HUB_HANDOFF__ = false;
+        window.dispatchEvent(new Event("docu-handoff-abort"));
+      }, 12000);
       client.auth.setSession({ access_token, refresh_token })
-        .then(() => window.location.replace(window.location.pathname + window.location.search))
+        .then(({ error }) => {
+          settled = true; clearTimeout(giveUp);
+          if (error) throw error;
+          window.location.replace(window.location.pathname + window.location.search);
+        })
         .catch((err) => {
+          settled = true; clearTimeout(giveUp);
           console.error("Hub SSO setSession failed", err);
           history.replaceState(null, "", window.location.pathname + window.location.search);
           window.__DOCU_HUB_HANDOFF__ = false;
+          window.dispatchEvent(new Event("docu-handoff-abort"));
         });
     }
   }
