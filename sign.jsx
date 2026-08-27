@@ -240,12 +240,21 @@
         const p = e.touches ? e.touches[0] : e;
         return { x: p.clientX - r.left, y: p.clientY - r.top };
       };
-      const start = (e) => { e.preventDefault(); drawing.current = true; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+      // Un toque suelto ya deja punto: si solo se pintara en mousemove, un trazo
+      // muy corto (o un tap en el movil) no dejaria tinta y el boton de firmar
+      // se quedaria bloqueado sin que se entienda por que.
+      const start = (e) => {
+        e.preventDefault();
+        drawing.current = true;
+        const { x, y } = pos(e);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 0.01, y); ctx.stroke();
+        dirty.current = true;
+      };
       const move = (e) => {
         if (!drawing.current) return;
         e.preventDefault();
         const { x, y } = pos(e); ctx.lineTo(x, y); ctx.stroke();
-        if (!dirty.current) { dirty.current = true; }
+        dirty.current = true;
       };
       const end = () => {
         if (!drawing.current) return;
@@ -817,6 +826,28 @@
     },
   };
 
+  function SignShell({ hotel, lang, setLang, legal, children }) {
+    return (
+      <div className="app sign-public">
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-mark">DH</span>
+            <span className="brand-name">Docuhotel</span>
+            {hotel && <span className="brand-tag">— {hotel}</span>}
+          </div>
+          <div className="spacer" />
+          <div className="lang-switch">
+            {["es", "en", "de"].map(l => (
+              <button key={l} className={l === lang ? "active" : ""} onClick={() => setLang(l)}>{l}</button>
+            ))}
+          </div>
+        </header>
+        <main className="main sign-main">{children}</main>
+        <footer className="sign-legal">{legal}</footer>
+      </div>
+    );
+  }
+
   function SignView({ token }) {
     const guess = (navigator.language || "es").slice(0, 2);
     const [lang, setLang] = useState(["es", "en", "de"].includes(guess) ? guess : "es");
@@ -827,6 +858,7 @@
     const [fatal, setFatal] = useState("");
     const [readDone, setReadDone] = useState(false);
     const [pagesSeen, setPagesSeen] = useState(0);
+    const [readSecs, setReadSecs] = useState(0);
     const [otpSent, setOtpSent] = useState(false);
     const [otpMsg, setOtpMsg] = useState("");
     const [code, setCode] = useState("");
@@ -903,40 +935,59 @@
       return () => { cancelled = true; };
     }, [data?.pdfUrl]);
 
-    // Seguimiento de lectura: cuántas páginas han pasado por pantalla y cuánto
-    // tiempo lleva abierto. Es la prueba de que el documento se leyó de verdad.
+    // Seguimiento de lectura: qué páginas han pasado por pantalla y cuánto tiempo
+    // lleva el documento abierto. Es la prueba de que se leyó de verdad, así que
+    // va por scroll y no por IntersectionObserver: dentro de un contenedor con
+    // scroll propio el observer no llegaba a disparar y el contador se quedaba
+    // clavado en 0, dejando el botón de firmar bloqueado para siempre.
+    //
+    // Además de llegar al final hay que haber estado un mínimo de tiempo delante
+    // (3 s por página, tope 30 s): si no, un documento corto se daría por leído
+    // en el mismo instante en que se abre y la prueba no valdría nada.
+    const minSeconds = Math.min(30, 3 + 3 * (totalPages || data?.pageCount || 1));
     useEffect(() => {
-      if (pdfMode !== "rendered" || done) return;
+      if (done) return;
       const box = boxRef.current;
       if (!box) return;
       const seen = new Set();
-      const io = new IntersectionObserver((entries) => {
-        let changed = false;
-        for (const en of entries) {
-          if (en.isIntersecting) { seen.add(Number(en.target.dataset.page)); changed = true; }
+      const secs = () => Math.round((Date.now() - startedAt.current) / 1000);
+
+      const check = () => {
+        const canvases = box.querySelectorAll("canvas[data-page]");
+        if (canvases.length) {
+          const br = box.getBoundingClientRect();
+          canvases.forEach((c) => {
+            const r = c.getBoundingClientRect();
+            if (r.top < br.bottom && r.bottom > br.top) seen.add(Number(c.dataset.page));
+          });
+          setPagesSeen(seen.size);
         }
-        if (!changed) return;
-        setPagesSeen(seen.size);
-        if (seen.size >= (totalPages || 1) && !sentDone.current) {
+        setReadSecs(secs());
+        const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight <= 30;
+        if (!sentDone.current && canvases.length && atEnd && seen.size >= canvases.length && secs() >= minSeconds) {
           sentDone.current = true;
           setReadDone(true);
           callSign("progress", {
-            t: token, pagesViewed: seen.size, totalPages,
-            readSeconds: Math.round((Date.now() - startedAt.current) / 1000), readCompleted: true,
+            t: token, pagesViewed: seen.size, totalPages: totalPages || data?.pageCount || 0,
+            readSeconds: secs(), readCompleted: true,
           }, { anon: true }).catch(() => {});
         }
-      }, { threshold: 0.35 });
-      box.querySelectorAll("canvas[data-page]").forEach(c => io.observe(c));
-      // Latido cada 20 s para que el tiempo en pantalla no se pierda si el
-      // firmante cierra la pestaña a mitad.
+      };
+
+      box.addEventListener("scroll", check, { passive: true });
+      // El tic también sirve de reloj: sin él, un documento que cabe entero en
+      // pantalla (sin scroll) nunca completaría el tiempo mínimo.
+      const tick = setInterval(check, 1000);
+      // Latido: el tiempo en pantalla no se pierde aunque cierre la pestaña a mitad.
       const beat = setInterval(() => {
         callSign("progress", {
-          t: token, pagesViewed: seen.size, totalPages,
-          readSeconds: Math.round((Date.now() - startedAt.current) / 1000),
+          t: token, pagesViewed: seen.size, totalPages: totalPages || data?.pageCount || 0,
+          readSeconds: secs(),
         }, { anon: true }).catch(() => {});
       }, 20000);
-      return () => { io.disconnect(); clearInterval(beat); };
-    }, [pdfMode, totalPages, token, done]);
+      check();
+      return () => { box.removeEventListener("scroll", check); clearInterval(tick); clearInterval(beat); };
+    }, [pdfMode, totalPages, token, done, minSeconds]);
 
     const markReadManually = () => {
       if (sentDone.current) return;
@@ -979,50 +1030,35 @@
       setBusy(false);
     };
 
-    const Shell = ({ children }) => (
-      <div className="app sign-public">
-        <header className="topbar">
-          <div className="brand">
-            <span className="brand-mark">DH</span>
-            <span className="brand-name">Docuhotel</span>
-            {data?.hotel && <span className="brand-tag">— {data.hotel}</span>}
-          </div>
-          <div className="spacer" />
-          <div className="lang-switch">
-            {["es", "en", "de"].map(l => (
-              <button key={l} className={l === lang ? "active" : ""} onClick={() => setLang(l)}>{l}</button>
-            ))}
-          </div>
-        </header>
-        <main className="main sign-main">{children}</main>
-        <footer className="sign-legal">{v.legal}</footer>
-      </div>
-    );
+    // El armazón se usa SIEMPRE como <SignShell>, nunca como un alias declarado
+    // aquí dentro: un componente definido dentro del render es un tipo distinto
+    // en cada pasada, React desmonta y vuelve a montar su árbol entero, y eso
+    // borraba los canvas del PDF ya pintados y realimentaba el efecto que los
+    // pinta hasta colgar la pestaña.
+    if (fatal) return <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}><div className="empty-state" style={{ padding: 60, textAlign: "center" }}><h2>{v.invalid}</h2><p>{fatal}</p></div></SignShell>;
+    if (!data) return <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}><div className="empty-state" style={{ padding: 60, textAlign: "center" }}>{v.loading}</div></SignShell>;
 
-    if (fatal) return <Shell><div className="empty-state" style={{ padding: 60, textAlign: "center" }}><h2>{v.invalid}</h2><p>{fatal}</p></div></Shell>;
-    if (!data) return <Shell><div className="empty-state" style={{ padding: 60, textAlign: "center" }}>{v.loading}</div></Shell>;
-
-    if (declined) return <Shell><div className="sign-result"><h2>{v.declineOk}</h2></div></Shell>;
+    if (declined) return <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}><div className="sign-result"><h2>{v.declineOk}</h2></div></SignShell>;
     if (done) return (
-      <Shell>
+      <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}>
         <div className="sign-result ok">
           <div className="sign-result-mark">✓</div>
           <h2>{v.doneTitle}</h2>
           <p>{v.doneHelp}</p>
         </div>
-      </Shell>
+      </SignShell>
     );
     if (data.signer.status === "signed") return (
-      <Shell>
+      <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}>
         <div className="sign-result ok">
           <div className="sign-result-mark">✓</div>
           <h2>{v.alreadyTitle}</h2>
           <p>{v.alreadyHelp} {fmtDT(data.signer.signedAt, lang)}.</p>
           {data.pdfUrl && <a className="btn" href={data.pdfUrl} target="_blank" rel="noopener">{v.openPdf}</a>}
         </div>
-      </Shell>
+      </SignShell>
     );
-    if (blocked) return <Shell><div className="sign-result"><h2>{data.title}</h2><p>{blocked}</p></div></Shell>;
+    if (blocked) return <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}><div className="sign-result"><h2>{data.title}</h2><p>{blocked}</p></div></SignShell>;
 
     const canSign = accepted
       && (!data.requireRead || readDone)
@@ -1031,7 +1067,7 @@
       && (data.signatureKind === "typed" ? typedName.trim().length > 2 : !!sigPng);
 
     return (
-      <Shell>
+      <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}>
         <div className="sign-head">
           <h1>{data.title}</h1>
           <p>{v.hi} <strong>{data.signer.name}</strong> — {data.sender.name} {v.asks}.</p>
@@ -1051,7 +1087,7 @@
         <div className={`sign-read-bar ${readDone ? "ok" : ""}`}>
           {readDone
             ? v.readOk
-            : <>{v.readFirst} <span className="sign-read-count">{v.pageOf} {pagesSeen}/{totalPages || data.pageCount || "?"}</span></>}
+            : <>{v.readFirst} <span className="sign-read-count">{v.pageOf} {pagesSeen}/{totalPages || data.pageCount || "?"}{readSecs < minSeconds ? ` · ${minSeconds - readSecs}s` : ""}</span></>}
         </div>
 
         <div className="sign-panel">
@@ -1117,7 +1153,7 @@
             <p className="doc-meta">SHA-256: <code>{data.fileSha256}</code></p>
           </details>
         </div>
-      </Shell>
+      </SignShell>
     );
   }
 

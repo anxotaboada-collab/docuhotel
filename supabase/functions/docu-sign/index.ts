@@ -151,6 +151,25 @@ const signUrl = (token: string) => `${APP_URL}/#/sign/${token}`;
 
 /* ───────────────────── rastro de auditoría encadenado ───────────────────── */
 
+// Forma canónica para el hash: claves ordenadas y sin depender de cómo devuelva
+// Postgres el JSON. `detail` se guarda como jsonb, que reordena las claves a su
+// antojo, y la marca de tiempo vuelve como '+00:00' en vez de 'Z'. Hasheando el
+// texto tal cual, al recalcular la cadena NUNCA cuadraba y el certificado acusaba
+// de manipulado un rastro intacto.
+function canon(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canon);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(o).sort()) if (o[k] !== undefined) out[k] = canon(o[k]);
+    return out;
+  }
+  return v;
+}
+function eventPayload(prev: string, ts: string, type: string, signerId: string | null, detail: unknown) {
+  return JSON.stringify(canon({ prev, ts: new Date(ts).toISOString(), type, signerId: signerId || null, detail }));
+}
+
 async function appendEvent(
   envelopeId: string, signerId: string | null, type: string,
   detail: Record<string, unknown>, meta: { ip?: string | null; ua?: string | null } = {},
@@ -159,8 +178,7 @@ async function appendEvent(
     .select('hash').eq('envelope_id', envelopeId).order('id', { ascending: false }).limit(1).maybeSingle();
   const prev = last?.hash || 'GENESIS';
   const ts = new Date().toISOString();
-  const payload = JSON.stringify({ prev, ts, type, signerId: signerId || null, detail });
-  const hash = await sha256Hex(payload);
+  const hash = await sha256Hex(eventPayload(prev, ts, type, signerId, detail));
   await db.from('sign_event').insert({
     envelope_id: envelopeId, signer_id: signerId, ts, type, detail,
     ip: meta.ip || null, ua: meta.ua || null, prev_hash: prev, hash,
@@ -176,7 +194,7 @@ async function verifyChain(envelopeId: string) {
   let prev = 'GENESIS';
   let ok = true;
   for (const e of data || []) {
-    const calc = await sha256Hex(JSON.stringify({ prev, ts: e.ts, type: e.type, signerId: e.signer_id || null, detail: e.detail }));
+    const calc = await sha256Hex(eventPayload(prev, e.ts, e.type, e.signer_id, e.detail));
     if (e.prev_hash !== prev || calc !== e.hash) { ok = false; break; }
     prev = e.hash;
   }
@@ -411,7 +429,10 @@ async function buildSignedPdf(env: Record<string, any>, signers: Signer[], chain
   kv('Autenticacion', env.require_otp ? 'Enlace personal + codigo de un solo uso al correo del firmante' : 'Enlace personal unico por firmante');
   kv('Lectura exigida', env.require_read ? 'Si - habia que recorrer el documento hasta el final' : 'No exigida');
   kv('Integridad', 'SHA-256 del documento y cadena de eventos encadenada por hash');
-  if (env.tsa_provider) kv('Sello de tiempo', `${env.tsa_provider} · ${fmtES(env.tsa_gen_time)}`);
+  // El sello se pide SOBRE este PDF ya terminado, así que su token no puede vivir
+  // dentro del propio PDF (cambiaría el hash sellado). Se dice aquí y se guarda
+  // en el sobre, de donde sale con la exportación del rastro.
+  kv('Sello de tiempo', 'RFC-3161 de una TSA externa sobre el SHA-256 de este PDF; el token se conserva en Docuhotel');
   kv('Cadena de auditoria', chain.ok ? `INTEGRA - ultimo eslabon ${String(chain.last).slice(0, 32)}` : 'ALTERADA (revisar)');
   y -= 8;
 
@@ -452,7 +473,7 @@ async function buildSignedPdf(env: Record<string, any>, signers: Signer[], chain
   heading('Como verificar este documento');
   text('1. Calcule el SHA-256 del PDF original que se envio a firmar y comparelo con el valor impreso en la pagina de firmas.\n' +
     '2. Solicite al hotel la exportacion del rastro de auditoria (JSON) desde Docuhotel: cada evento incluye su hash y el del evento anterior; recalculando la cadena se comprueba que nada fue alterado.\n' +
-    (env.tsa_provider ? '3. El sello de tiempo RFC-3161 emitido por ' + env.tsa_provider + ' puede verificarse con "openssl ts -verify" sobre el token que conserva el hotel.\n' : ''),
+    '3. Pida al hotel el sello de tiempo RFC-3161 de este PDF (viene en la exportacion del rastro) y verifiquelo con "openssl ts -verify": acredita ante un tercero que el documento ya existia en esa fecha.\n',
     8.5, helv, rgb(0.3, 0.32, 0.36), 2.5);
 
   return await pdf.save();
@@ -688,7 +709,7 @@ async function opAudit(body: any, user: any) {
       generatedAt: new Date().toISOString(),
       envelope: env,
       signers: (signers || []).map(({ token, otp_hash, ...s }) => s),
-      chain: { verified: chain.ok, algorithm: 'sha256(JSON{prev,ts,type,signerId,detail})', last: chain.last },
+      chain: { verified: chain.ok, algorithm: 'sha256(JSON canonico {prev,ts,type,signerId,detail})', last: chain.last },
       events: chain.events,
     },
   });
