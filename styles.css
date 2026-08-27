@@ -983,3 +983,179 @@ button { font: inherit; color: inherit; }
   .viewer-pdf-frame { min-height: 68vh; }
   .viewer-page { width: 100%; min-height: 0; padding: 28px 20px; }
 }
+
+/* === Firmas (sign.jsx): panel del hotel y página del firmante === */
+
+/* Piezas de formulario que el resto de la app resolvía inline y aquí se
+   repiten mucho: sección, etiqueta, fila con casilla y aviso de error. */
+.form-section { margin-bottom: 20px; }
+.form-section + .form-section { border-top: 1px solid var(--line); padding-top: 18px; }
+.form-label {
+  display: block; font-size: 12px; color: var(--muted); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+}
+.form-label.sm { font-size: 11px; }
+.form-error {
+  background: var(--danger-bg); color: var(--danger);
+  padding: 9px 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 14px;
+}
+.check-row {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 8px 0; font-size: 13.5px; cursor: pointer;
+}
+.check-row input { margin-top: 3px; flex-shrink: 0; }
+.page-actions { display: flex; gap: 8px; align-items: center; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.btn-lg { padding: 11px 20px; font-size: 15px; }
+
+.sign-filters { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+
+/* Una fila de puntos por sobre: de un vistazo se ve quién falta. */
+.sign-signers-cell { display: flex; align-items: center; gap: 8px; }
+.sign-dots { display: inline-flex; gap: 3px; }
+.sign-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); }
+.sign-dot.opened { background: var(--muted-2); }
+.sign-dot.read { background: var(--pending); }
+.sign-dot.signed { background: var(--ok); }
+.sign-dot.declined { background: var(--danger); }
+
+.pill.sign-sent { background: var(--pending-bg); color: var(--pending); }
+.pill.sign-completed, .pill.sign-signed { background: var(--ok-bg); color: var(--ok); }
+.pill.sign-cancelled, .pill.sign-declined { background: var(--danger-bg); color: var(--danger); }
+.pill.sign-pending, .pill.sign-opened, .pill.sign-read { background: var(--neutral-bg); color: var(--neutral); }
+
+.sign-doc-list {
+  max-height: 210px; overflow-y: auto; border: 1px solid var(--line);
+  border-radius: var(--radius); margin-top: 8px;
+}
+.sign-doc-opt {
+  display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px;
+  border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13.5px;
+}
+.sign-doc-opt:last-child { border-bottom: none; }
+.sign-doc-opt:hover { background: var(--bg-soft); }
+.sign-doc-opt.active { background: var(--bg-soft-2); }
+.sign-doc-name { display: block; font-weight: 500; }
+
+.sign-signer-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 8px; }
+.sign-signer-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sign-people { max-width: 300px; }
+.sign-opts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+.sign-days { display: flex; align-items: center; gap: 6px; }
+.sign-days input { width: 80px; }
+
+.sign-link-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 10px; background: var(--bg-soft);
+}
+.sign-link-who { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.sign-link-url {
+  display: block; font-family: var(--font-mono); font-size: 11.5px;
+  word-break: break-all; color: var(--muted); margin-bottom: 8px;
+}
+.sign-link-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.sign-kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-bottom: 16px; }
+.sign-kv-grid .wide { grid-column: 1 / -1; }
+.sign-kv-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sign-kv-grid span {
+  font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sign-kv-grid code { font-family: var(--font-mono); font-size: 11.5px; word-break: break-all; }
+
+.sign-chain {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 18px;
+}
+.sign-chain.ok { background: var(--ok-bg); color: var(--ok); }
+.sign-chain.bad { background: var(--danger-bg); color: var(--danger); }
+.sign-chain code { font-family: var(--font-mono); font-size: 11px; opacity: .8; }
+
+.sign-h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 20px 0 10px; }
+.sign-signer-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 11px 13px; margin-bottom: 9px; }
+.sign-signer-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
+
+.sign-trail { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.sign-trail-row {
+  display: grid; grid-template-columns: 150px 1fr 90px; gap: 10px;
+  padding: 6px 11px; font-size: 12.5px; border-bottom: 1px solid var(--line); align-items: baseline;
+}
+.sign-trail-row:last-child { border-bottom: none; }
+.sign-trail-row.signed { background: var(--ok-bg); }
+.sign-trail-row.declined { background: var(--danger-bg); }
+.sign-trail-ts { color: var(--muted); font-size: 11.5px; }
+.sign-trail-meta { color: var(--muted); font-size: 11.5px; }
+.sign-trail-hash { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2); text-align: right; }
+
+/* ── Página del firmante ── */
+.sign-public .sign-main { max-width: 860px; margin: 0 auto; padding-bottom: 60px; }
+.sign-head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.018em; margin: 0 0 6px; }
+.sign-head p { color: var(--muted); margin: 0 0 12px; }
+.sign-message {
+  background: var(--bg-soft); border-left: 3px solid var(--ink);
+  padding: 11px 14px; border-radius: 0 var(--radius) var(--radius) 0;
+  white-space: pre-wrap; font-size: 14px; margin-bottom: 16px;
+}
+.sign-doc-box { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-soft-2); overflow: hidden; }
+.sign-pdf-scroll {
+  max-height: 62vh; overflow-y: auto; padding: 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.sign-pdf-scroll canvas { box-shadow: var(--shadow-md); background: #fff; max-width: 100%; }
+.sign-pdf-fallback { padding: 12px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.sign-pdf-fallback iframe { width: 100%; height: 60vh; border: none; background: #fff; }
+
+/* Barra de lectura: mientras no llegue al final, el firmante ve cuánto le falta. */
+.sign-read-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  background: var(--warn-bg); color: var(--warn);
+  padding: 9px 14px; font-size: 13px; border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  display: flex; gap: 10px; align-items: center; justify-content: space-between;
+}
+.sign-read-bar.ok { background: var(--ok-bg); color: var(--ok); }
+.sign-read-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.sign-panel { margin-top: 26px; }
+.sign-step { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px; }
+.sign-step h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 12px; }
+.sign-field { margin-bottom: 12px; max-width: 340px; }
+.sign-ok { color: var(--ok); font-weight: 600; }
+.sign-otp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sign-otp { width: 150px; font-size: 20px; letter-spacing: 5px; text-align: center; font-family: var(--font-mono); }
+.sign-typed { font-size: 20px; }
+
+.sign-pad-wrap { border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--bg); }
+.sign-pad { display: block; width: 100%; height: 170px; touch-action: none; cursor: crosshair; }
+.sign-pad-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; border-top: 1px dashed var(--line-strong);
+}
+.sign-pad-hint { font-size: 12px; color: var(--muted); }
+
+.sign-consent {
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2);
+  max-height: 190px; overflow-y: auto; margin-bottom: 10px;
+}
+.sign-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.sign-evidence { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.sign-evidence summary { cursor: pointer; }
+.sign-evidence ul { margin: 8px 0; padding-left: 20px; line-height: 1.7; }
+.sign-evidence code { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+.sign-legal { text-align: center; color: var(--muted-2); font-size: 11.5px; padding: 20px 14px 34px; }
+
+.sign-result { text-align: center; padding: 70px 20px; }
+.sign-result h2 { font-size: 22px; margin: 0 0 10px; }
+.sign-result p { color: var(--muted); max-width: 480px; margin: 0 auto 16px; line-height: 1.6; }
+.sign-result-mark {
+  width: 62px; height: 62px; border-radius: 50%; background: var(--ok-bg); color: var(--ok);
+  font-size: 32px; line-height: 62px; margin: 0 auto 18px;
+}
+
+@media (max-width: 720px) {
+  .sign-signer-row { grid-template-columns: 1fr auto; }
+  .sign-opts-grid { grid-template-columns: 1fr; }
+  .sign-kv-grid { grid-template-columns: 1fr; }
+  .sign-trail-row { grid-template-columns: 1fr; gap: 2px; }
+  .sign-trail-hash { text-align: left; }
+}

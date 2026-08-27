@@ -3,7 +3,7 @@ const TRANSLATIONS = {
   es: {
     appName: "Docuhotel",
     appTagline: "Gestor de documentos del hotel",
-    nav: { documents: "Documentos", log: "Registro", admin: "Administración", projects: "Proyectos", requests: "Solicitudes" },
+    nav: { documents: "Documentos", log: "Registro", admin: "Administración", projects: "Proyectos", requests: "Solicitudes", sign: "Firmas" },
     common: {
       search: "Buscar",
       all: "Todos",
@@ -416,7 +416,7 @@ const TRANSLATIONS = {
   en: {
     appName: "Docuhotel",
     appTagline: "Hotel document manager",
-    nav: { documents: "Documents", log: "Activity log", admin: "Administration", projects: "Projects", requests: "Requests" },
+    nav: { documents: "Documents", log: "Activity log", admin: "Administration", projects: "Projects", requests: "Requests", sign: "Signatures" },
     common: {
       search: "Search",
       all: "All",
@@ -829,7 +829,7 @@ const TRANSLATIONS = {
   de: {
     appName: "Docuhotel",
     appTagline: "Dokumentenverwaltung für Hotels",
-    nav: { documents: "Dokumente", log: "Protokoll", admin: "Verwaltung", projects: "Projekte", requests: "Anfragen" },
+    nav: { documents: "Dokumente", log: "Protokoll", admin: "Verwaltung", projects: "Projekte", requests: "Anfragen", sign: "Unterschriften" },
     common: {
       search: "Suchen",
       all: "Alle",

@@ -10,7 +10,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 function App() {
   const useBackend = !!(window.DocuApi && !window.DocuApi.offline);
   const [route, setRouteState] = useState(window.location.hash || "");
-  const isPublicRoute = /^#\/(public|audit|request)\//.test(route);
+  const isPublicRoute = /^#\/(public|audit|request|sign)\//.test(route);
 
   const [bootStatus, setBootStatus] = useState(
     useBackend && !isPublicRoute ? "loading" : "ready"
@@ -213,6 +213,13 @@ function App() {
     });
   };
 
+  // Signer route: #/sign/<token>. SignView is self-contained (it talks to the
+  // docu-sign edge function), so it must resolve BEFORE the bootstrap guards:
+  // bootPublic() loads nothing for this route and the "!state" guard below
+  // would otherwise leave the signer staring at a spinner forever.
+  const signMatch = route.match(/^#\/sign\/(.+)$/);
+  if (signMatch) return <window.SignView token={signMatch[1]} />;
+
   if (useBackend && !isPublicRoute) {
     if (bootStatus === "loading") return <window.LoadingScreen label="Cargando datos del hotel…" />;
     if (bootStatus === "error")   return <window.ErrorScreen message={bootError} onRetry={() => { setBootError(""); setBootStatus("loading"); setBootRetry(n => n + 1); }} onSignOut={() => window.DocuApi.signOut().then(() => location.reload())} />;
@@ -262,6 +269,7 @@ function App() {
   const canViewLog = can("viewLog") || canAdmin;
   const canRegional = !!state.config?.isRegional && !isImpersonating;
   const visibleTabs = ["documents", "projects", "requests"]
+    .concat(can("create") ? ["sign"] : [])
     .concat(canViewLog ? ["log"] : [])
     .concat(canAdmin ? ["admin"] : [])
     .concat(canRegional ? ["regional"] : []);
@@ -349,6 +357,7 @@ function App() {
           <button className={`tab ${effectiveTab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>{t.nav.documents}</button>
           <button className={`tab ${effectiveTab === "projects" ? "active" : ""}`} onClick={() => setTab("projects")}>{t.nav.projects || "Proyectos"}</button>
           <button className={`tab ${effectiveTab === "requests" ? "active" : ""}`} onClick={() => setTab("requests")}>{t.nav.requests || "Solicitudes"}</button>
+          {can("create") && <button className={`tab ${effectiveTab === "sign" ? "active" : ""}`} onClick={() => setTab("sign")}>{t.nav.sign || "Firmas"}</button>}
           {canViewLog && <button className={`tab ${effectiveTab === "log" ? "active" : ""}`} onClick={() => setTab("log")}>{t.nav.log}</button>}
           {canAdmin && <button className={`tab ${effectiveTab === "admin" ? "active" : ""}`} onClick={() => setTab("admin")}>{t.nav.admin}</button>}
           {canRegional && (
@@ -398,6 +407,9 @@ function App() {
             openViewer={openViewer} log={log} density={tweaks.density} can={can} viewerUser={currentUser}
             editDocId={pendingEditDocId} onEditDocHandled={() => setPendingEditDocId(null)}
           />
+        )}
+        {effectiveTab === "sign" && (
+          <window.SignaturesPage state={state} t={t} lang={lang} log={log} pushToast={pushToast} />
         )}
         {effectiveTab === "log" && <LogPage state={state} t={t} lang={lang} />}
         {effectiveTab === "admin" && <AdminPage state={state} setState={setState} t={t} lang={lang} log={log} onImpersonate={(uid) => { setImpersonateId(uid); setTab("documents"); }} />}

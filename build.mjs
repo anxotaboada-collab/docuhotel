@@ -35,6 +35,7 @@ const FILES = [
   "projects.jsx",
   "audit.jsx",
   "requests.jsx",
+  "sign.jsx",
   "regional.jsx",
   "app.jsx",
 ];
