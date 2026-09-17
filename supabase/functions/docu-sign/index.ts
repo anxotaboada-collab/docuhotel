@@ -359,7 +359,9 @@ async function buildSignedPdf(env: Record<string, any>, signers: Signer[], chain
       const flush = () => { room(size + gap); page.drawText(line, { x: M, y, size, font: f, color }); y -= size + gap; line = ''; };
       for (const w of words) {
         const next = line ? line + ' ' + w : w;
-        if (f.widthOfTextAtSize(next, size) > maxW && line) flush();
+        // La palabra que desborda abre la línea siguiente. Antes se descartaba al
+        // hacer flush() y el certificado imprimía el consentimiento con huecos.
+        if (f.widthOfTextAtSize(next, size) > maxW && line) { flush(); line = w; }
         else line = next;
       }
       flush();
@@ -523,14 +525,55 @@ async function finalize(envId: string) {
 
 /* ─────────────────────────── operaciones del hotel ─────────────────────────── */
 
+// PDF subido suelto para firmar (un contrato que no está en el gestor). El
+// navegador lo sube con la sesión del usuario —la política storage_docs_write ya
+// exige admin/dept_head/regional en ese hotel— a esta ruta temporal, y aquí se
+// valida, se congela en sign/<sobre>/original.pdf y se borra la temporal.
+const UPLOAD_RE = /^docs\/([0-9a-f-]{36})\/_firma\/[0-9a-f-]{36}\.pdf$/i;
+const MAX_PDF = 50 * 1024 * 1024;
+
 async function opCreate(req: Request, body: any, user: any) {
   const hotelId = String(body.hotelId || '');
   if (!user.hotels.includes(hotelId)) return json({ error: 'Sin acceso a ese hotel' }, 403);
-  const doc = body.documentId
-    ? (await db.from('documents').select('*').eq('id', body.documentId).maybeSingle()).data
-    : null;
-  const fileKey = body.fileKey || doc?.file_key;
-  if (!fileKey) return json({ error: 'El documento no tiene archivo adjunto' }, 400);
+
+  const uploadKey = body.uploadKey ? String(body.uploadKey) : '';
+  if (uploadKey) {
+    const m = uploadKey.match(UPLOAD_RE);
+    if (!m || m[1].toLowerCase() !== hotelId.toLowerCase()) return json({ error: 'Archivo subido no válido' }, 400);
+    if (body.documentId) return json({ error: 'Elige un documento del gestor o sube un PDF, no las dos cosas' }, 400);
+  }
+  // La subida temporal se borra pase lo que pase: si el sobre se crea, ya existe
+  // su copia congelada; si falla, no debe quedar un contrato huérfano en Storage.
+  try {
+    return await createEnvelope(req, body, user, hotelId, uploadKey);
+  } finally {
+    if (uploadKey) {
+      try { await db.storage.from(BUCKET).remove([uploadKey]); } catch (_e) { /* best-effort */ }
+    }
+  }
+}
+
+async function createEnvelope(req: Request, body: any, user: any, hotelId: string, uploadKey: string) {
+  // El origen del PDF sale SOLO de dos sitios comprobados: un documento al que el
+  // usuario llega, o su propia subida. Nunca de una ruta libre que mande el
+  // navegador: la función lee Storage con la service role y podría sacar a firmar
+  // el archivo de otro hotel.
+  let doc: any = null;
+  let fileKey = uploadKey;
+  if (!uploadKey) {
+    if (!body.documentId) return json({ error: 'Elige un documento o sube un PDF' }, 400);
+    doc = (await db.from('documents').select('*').eq('id', String(body.documentId)).maybeSingle()).data;
+    if (!doc) return json({ error: 'Documento no encontrado' }, 404);
+    let reachable = user.hotels.includes(doc.hotel_id);
+    if (!reachable) {
+      const { data: shared } = await db.from('document_hotels')
+        .select('hotel_id').eq('document_id', doc.id).eq('hotel_id', hotelId).maybeSingle();
+      reachable = !!shared;
+    }
+    if (!reachable) return json({ error: 'Sin acceso a ese documento' }, 403);
+    fileKey = doc.file_key;
+    if (!fileKey) return json({ error: 'El documento no tiene archivo adjunto' }, 400);
+  }
 
   const signers = (body.signers || []).filter((s: any) => s?.email && s?.name);
   if (!signers.length) return json({ error: 'Añade al menos un firmante' }, 400);
@@ -541,25 +584,40 @@ async function opCreate(req: Request, body: any, user: any) {
   // Copia CONGELADA del PDF: lo que se firma no puede cambiar después aunque el
   // documento del gestor se sustituya por una versión nueva.
   const { data: src } = await db.storage.from(BUCKET).download(fileKey);
-  if (!src) return json({ error: 'No se pudo leer el archivo del documento' }, 400);
+  if (!src) return json({ error: uploadKey ? 'No se encontró el PDF subido. Vuelve a intentarlo.' : 'No se pudo leer el archivo del documento' }, 400);
   const bytes = new Uint8Array(await src.arrayBuffer());
+  if (bytes.length > MAX_PDF) return json({ error: 'El PDF supera los 50 MB' }, 400);
+  // Firma de fichero: la extensión y el tipo MIME los pone el navegador y no prueban nada.
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 1024));
+  if (!head.includes('%PDF-')) return json({ error: 'El archivo no es un PDF' }, 400);
   const fileSha = await sha256Hex(bytes);
   let pageCount: number | null = null;
-  try { pageCount = (await PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(); }
-  catch { return json({ error: 'Solo se pueden enviar a firmar documentos PDF' }, 400); }
+  try {
+    const probe = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    // Un PDF cifrado (con contraseña o con restricciones) no se puede sellar: pdf-lib
+    // escribiría páginas nuevas sin cifrar dentro de un fichero cifrado y el PDF
+    // firmado saldría roto justo al final, cuando ya han firmado todos.
+    if (probe.isEncrypted) {
+      return json({ error: 'El PDF está protegido (contraseña o restricciones). Ábrelo e imprímelo como PDF nuevo sin protección, y súbelo otra vez.' }, 400);
+    }
+    pageCount = probe.getPageCount();
+  } catch { return json({ error: 'Solo se pueden enviar a firmar documentos PDF válidos' }, 400); }
+  if (!pageCount) return json({ error: 'El PDF no tiene páginas' }, 400);
 
   const id = crypto.randomUUID();
   const key = `sign/${id}/original.pdf`;
   const up = await db.storage.from(BUCKET).upload(key, bytes, { contentType: 'application/pdf', upsert: true });
   if (up.error) return json({ error: 'No se pudo preparar el documento: ' + up.error.message }, 500);
 
-  const title = String(body.title || doc?.title || 'Documento').slice(0, 200);
+  const title = String(body.title || doc?.title || 'Documento').trim().slice(0, 200) || 'Documento';
   const consent = String(body.consentText || CONSENT_ES(title));
   const days = Math.min(180, Math.max(1, Number(body.expiresDays) || 30));
+  let fileName = doc?.file_name || String(body.fileName || '').replace(/[\\/\x00-\x1f]+/g, '_').trim().slice(0, 160) || 'documento.pdf';
+  if (!/\.pdf$/i.test(fileName)) fileName += '.pdf';
   const env = {
     id, hotel_id: hotelId, document_id: doc?.id || null,
     title, message: String(body.message || '').slice(0, 4000),
-    file_key: key, file_name: doc?.file_name || body.fileName || 'documento.pdf',
+    file_key: key, file_name: fileName,
     file_size: bytes.length, file_mime: 'application/pdf', file_sha256: fileSha, page_count: pageCount,
     mode: body.mode === 'sequential' ? 'sequential' : 'parallel',
     require_otp: body.requireOtp !== false,
@@ -584,6 +642,7 @@ async function opCreate(req: Request, body: any, user: any) {
   const meta = reqMeta(req);
   await appendEvent(id, null, 'created', {
     title, docSha256: fileSha, pages: pageCount,
+    source: doc ? 'gestor' : 'subido', fileName,
     by: `${user.name} <${user.email}>`, signers: rows.map((r: any) => `${r.name} <${r.email}>`),
     requireOtp: env.require_otp, requireRead: env.require_read, mode: env.mode,
   }, meta);

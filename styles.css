@@ -1036,6 +1036,7 @@ button { font: inherit; color: inherit; }
 .sign-doc-opt:hover { background: var(--bg-soft); }
 .sign-doc-opt.active { background: var(--bg-soft-2); }
 .sign-doc-name { display: block; font-weight: 500; }
+.dropzone.sign-drop-active { border-color: var(--ink); color: var(--ink); background: var(--bg-soft-2); }
 
 .sign-signer-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 8px; }
 .sign-signer-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

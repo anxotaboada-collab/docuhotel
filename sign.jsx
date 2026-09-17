@@ -49,13 +49,19 @@
       status: { sent: "En curso", completed: "Firmado", cancelled: "Anulado", expired: "Caducado" },
       signerStatus: { pending: "Sin abrir", opened: "Abierto", read: "Leído", signed: "Firmado", declined: "Rechazado" },
       col: { doc: "Documento", signers: "Firmantes", status: "Estado", sent: "Enviado", expires: "Caduca", actions: "" },
-      view: "Ver", remind: "Recordar", cancel: "Anular", signedPdf: "PDF firmado", origPdf: "PDF enviado",
+      view: "Ver", remind: "Recordar", cancel: "Anular", signedPdf: "PDF firmado", origPdf: "PDF enviado", uploaded: "PDF subido",
       exportAudit: "Exportar rastro (JSON)", copyLink: "Copiar enlace", copied: "Enlace copiado",
       openMail: "Abrir en mi correo", qr: "QR",
       wizard: {
         title: "Enviar un documento a firmar",
         doc: "Documento a firmar", docHelp: "Solo documentos PDF ya subidos al gestor.",
         noDocs: "No hay documentos PDF en este hotel.",
+        srcGestor: "Del gestor", srcUpload: "Subir un PDF",
+        uploadHelp: "Un contrato u otro PDF que no está en el gestor. Se firma tal cual, byte a byte: no se comprime ni se archiva como documento.",
+        uploadPick: "Pulsa o arrastra aquí el PDF (máx. 50 MB)", uploadChange: "Cambiar archivo",
+        uploadTitle: "Título que verá el firmante",
+        errNotPdf: "El archivo no es un PDF.", errTooBig: "El PDF supera los 50 MB.", errNoTitle: "Pon un título al documento.",
+        uploading: "Subiendo el PDF…",
         searchDoc: "Buscar documento…",
         signers: "Firmantes", addSigner: "Añadir firmante", fromUsers: "Añadir del hotel",
         name: "Nombre y apellidos", email: "Correo electrónico",
@@ -99,13 +105,19 @@
       status: { sent: "In progress", completed: "Signed", cancelled: "Cancelled", expired: "Expired" },
       signerStatus: { pending: "Not opened", opened: "Opened", read: "Read", signed: "Signed", declined: "Declined" },
       col: { doc: "Document", signers: "Signers", status: "Status", sent: "Sent", expires: "Expires", actions: "" },
-      view: "View", remind: "Remind", cancel: "Cancel", signedPdf: "Signed PDF", origPdf: "Sent PDF",
+      view: "View", remind: "Remind", cancel: "Cancel", signedPdf: "Signed PDF", origPdf: "Sent PDF", uploaded: "Uploaded PDF",
       exportAudit: "Export trail (JSON)", copyLink: "Copy link", copied: "Link copied",
       openMail: "Open in my mail app", qr: "QR",
       wizard: {
         title: "Send a document for signature",
         doc: "Document", docHelp: "Only PDF documents already uploaded.",
         noDocs: "No PDF documents in this hotel.",
+        srcGestor: "From the library", srcUpload: "Upload a PDF",
+        uploadHelp: "A contract or any PDF that is not in the library. It is signed exactly as uploaded: not compressed and not filed as a document.",
+        uploadPick: "Click or drop the PDF here (max. 50 MB)", uploadChange: "Change file",
+        uploadTitle: "Title the signer will see",
+        errNotPdf: "The file is not a PDF.", errTooBig: "The PDF is larger than 50 MB.", errNoTitle: "Give the document a title.",
+        uploading: "Uploading the PDF…",
         searchDoc: "Search document…",
         signers: "Signers", addSigner: "Add signer", fromUsers: "Add from hotel",
         name: "Full name", email: "Email",
@@ -149,13 +161,19 @@
       status: { sent: "Laufend", completed: "Unterschrieben", cancelled: "Storniert", expired: "Abgelaufen" },
       signerStatus: { pending: "Nicht geöffnet", opened: "Geöffnet", read: "Gelesen", signed: "Unterschrieben", declined: "Abgelehnt" },
       col: { doc: "Dokument", signers: "Unterzeichner", status: "Status", sent: "Gesendet", expires: "Läuft ab", actions: "" },
-      view: "Ansehen", remind: "Erinnern", cancel: "Stornieren", signedPdf: "Unterschriebenes PDF", origPdf: "Gesendetes PDF",
+      view: "Ansehen", remind: "Erinnern", cancel: "Stornieren", signedPdf: "Unterschriebenes PDF", origPdf: "Gesendetes PDF", uploaded: "Hochgeladenes PDF",
       exportAudit: "Protokoll exportieren (JSON)", copyLink: "Link kopieren", copied: "Link kopiert",
       openMail: "In meinem Mailprogramm öffnen", qr: "QR",
       wizard: {
         title: "Ein Dokument zur Unterschrift senden",
         doc: "Dokument", docHelp: "Nur bereits hochgeladene PDF-Dokumente.",
         noDocs: "Keine PDF-Dokumente in diesem Hotel.",
+        srcGestor: "Aus der Ablage", srcUpload: "PDF hochladen",
+        uploadHelp: "Ein Vertrag oder ein anderes PDF, das nicht in der Ablage ist. Es wird unverändert unterschrieben: nicht komprimiert und nicht als Dokument abgelegt.",
+        uploadPick: "Klicken oder PDF hierher ziehen (max. 50 MB)", uploadChange: "Datei ändern",
+        uploadTitle: "Titel, den der Unterzeichner sieht",
+        errNotPdf: "Die Datei ist kein PDF.", errTooBig: "Das PDF ist größer als 50 MB.", errNoTitle: "Gib dem Dokument einen Titel.",
+        uploading: "PDF wird hochgeladen…",
         searchDoc: "Dokument suchen…",
         signers: "Unterzeichner", addSigner: "Unterzeichner hinzufügen", fromUsers: "Aus dem Hotel hinzufügen",
         name: "Vor- und Nachname", email: "E-Mail",
@@ -212,6 +230,10 @@
     ? new Date(iso).toLocaleDateString(lang === "de" ? "de-DE" : lang === "en" ? "en-GB" : "es-ES",
         { day: "2-digit", month: "short", year: "numeric" })
     : "—";
+
+  // Mismo tope que el bucket de Storage (file_size_limit 50 MB).
+  const MAX_UPLOAD = 50 * 1024 * 1024;
+  const fmtSize = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   const copy = async (text) => { try { await navigator.clipboard.writeText(text); return true; } catch (_e) { return false; } };
 
@@ -382,7 +404,7 @@
                         <div className="doc-title"><Icon.doc style={{ color: "var(--muted)", flexShrink: 0 }} />
                           <div>
                             <div style={{ fontWeight: 600 }}>{env.title}</div>
-                            <div className="doc-meta">{env.file_name} · {env.page_count} p. · {env.require_otp ? "OTP" : "sin OTP"}{env.require_read ? " · lectura" : ""}</div>
+                            <div className="doc-meta">{env.document_id ? "" : `${s.uploaded} · `}{env.file_name} · {env.page_count} p. · {env.require_otp ? "OTP" : "sin OTP"}{env.require_read ? " · lectura" : ""}</div>
                           </div>
                         </div>
                       </td>
@@ -443,6 +465,13 @@
       [state.documents]);
     const [q, setQ] = useState("");
     const [docId, setDocId] = useState("");
+    // Origen del PDF: un documento del gestor o un PDF suelto (un contrato, p. ej.).
+    const [source, setSource] = useState(pdfDocs.length ? "gestor" : "upload");
+    const [upFile, setUpFile] = useState(null);
+    const [upTitle, setUpTitle] = useState("");
+    const [drag, setDrag] = useState(false);
+    const [stage, setStage] = useState("");
+    const fileRef = useRef(null);
     const [signers, setSigners] = useState([{ name: "", email: "" }]);
     const [message, setMessage] = useState("");
     const [requireOtp, setRequireOtp] = useState(true);
@@ -460,7 +489,23 @@
     const shown = q
       ? pdfDocs.filter(d => (d.title || "").toLowerCase().includes(q.toLowerCase()))
       : pdfDocs;
-    const effConsent = consentText || consentDefault(doc?.title || "…");
+    const docTitle = source === "upload" ? upTitle.trim() : doc?.title;
+    const ready = source === "upload" ? !!upFile && !!upTitle.trim() : !!doc;
+    const effConsent = consentText || consentDefault(docTitle || "…");
+
+    // Se comprueba en el navegador para avisar al momento; la edge function lo
+    // vuelve a comprobar todo, porque aquí cualquiera puede saltarse el JS.
+    const pickUpload = async (f) => {
+      setErr("");
+      if (!f) return;
+      if (f.size > MAX_UPLOAD) { setErr(s.wizard.errTooBig); return; }
+      let isPdf = false;
+      try { isPdf = new TextDecoder("latin1").decode(await f.slice(0, 1024).arrayBuffer()).includes("%PDF-"); }
+      catch (_e) { isPdf = /\.pdf$/i.test(f.name || ""); }
+      if (!isPdf) { setErr(s.wizard.errNotPdf); return; }
+      setUpFile(f);
+      setUpTitle(t0 => t0 || (f.name || "").replace(/\.pdf$/i, "").replace(/[_]+/g, " ").trim());
+    };
 
     const setSigner = (i, patch) => setSigners(arr => arr.map((x, n) => n === i ? { ...x, ...patch } : x));
     const addFromHotel = (u) => setSigners(arr => {
@@ -473,17 +518,38 @@
       setErr(""); setBusy(true);
       try {
         const list = signers.filter(x => x.name.trim() && x.email.trim());
-        if (!doc) throw new Error(s.wizard.doc + ": —");
+        if (source === "upload") {
+          if (!upFile) throw new Error(s.wizard.errNotPdf);
+          if (!upTitle.trim()) throw new Error(s.wizard.errNoTitle);
+        } else if (!doc) throw new Error(s.wizard.doc + ": —");
         if (!list.length) throw new Error(s.wizard.addSigner);
+
+        let origin = { documentId: doc?.id };
+        if (source === "upload") {
+          // Sube el PDF tal cual, SIN pasar por DocuCompress: lo que se firma tiene
+          // que ser byte a byte el contrato que se eligió. La ruta cae bajo
+          // docs/<hotel>/ para que la política de Storage exija el mismo rol que la
+          // edge function; esta la congela en el sobre y borra la temporal.
+          setStage(s.wizard.uploading);
+          const cfg = window.DOCUHOTEL_CONFIG || {};
+          const key = `docs/${state.hotelId}/_firma/${crypto.randomUUID()}.pdf`;
+          const { error } = await window.DocuApi.client.storage
+            .from(cfg.storageBucket || "docuhotel")
+            .upload(key, upFile, { contentType: "application/pdf", upsert: false, cacheControl: "60" });
+          if (error) throw new Error(error.message || String(error));
+          setStage(s.wizard.sending);
+          origin = { uploadKey: key, fileName: upFile.name };
+        }
+
         const res = await callSign("create", {
-          hotelId: state.hotelId, documentId: doc.id, title: doc.title,
+          hotelId: state.hotelId, ...origin, title: docTitle,
           signers: list, message, requireOtp, requireRead, requireId,
           signatureKind, mode, expiresDays: Number(expiresDays) || 30,
           consentText: consentText || undefined,
           send,
         });
-        onCreated({ ...res, title: doc.title, sent: send });
-      } catch (e) { setErr(e.message); setBusy(false); }
+        onCreated({ ...res, title: docTitle, sent: send });
+      } catch (e) { setErr(e.message); setBusy(false); setStage(""); }
     };
 
     const people = (state.users || []).filter(u => u.email);
@@ -493,9 +559,9 @@
         footer={
           <>
             <button className="btn" onClick={onClose} disabled={busy}>{t.common.cancel}</button>
-            <button className="btn" onClick={() => submit(false)} disabled={busy || !doc}>{s.wizard.linksOnly}</button>
-            <button className="btn btn-primary" onClick={() => submit(true)} disabled={busy || !doc}>
-              <Icon.send /> {busy ? s.wizard.sending : s.wizard.sendNow}
+            <button className="btn" onClick={() => submit(false)} disabled={busy || !ready}>{s.wizard.linksOnly}</button>
+            <button className="btn btn-primary" onClick={() => submit(true)} disabled={busy || !ready}>
+              <Icon.send /> {busy ? (stage || s.wizard.sending) : s.wizard.sendNow}
             </button>
           </>
         }>
@@ -503,11 +569,43 @@
 
         <div className="form-section">
           <label className="form-label">{s.wizard.doc}</label>
-          <p className="help-text">{s.wizard.docHelp}</p>
-          {pdfDocs.length === 0
+          <div className="sign-filters" style={{ margin: "4px 0 8px" }}>
+            {["gestor", "upload"].map(k => (
+              <button key={k} type="button" disabled={busy} className={`toggle-chip ${source === k ? "active" : ""}`}
+                onClick={() => { setSource(k); setErr(""); }}>
+                {k === "gestor" ? s.wizard.srcGestor : s.wizard.srcUpload}
+              </button>
+            ))}
+          </div>
+          {source === "upload" ? (
+            <>
+              <p className="help-text">{s.wizard.uploadHelp}</p>
+              <div className={`dropzone ${drag ? "sign-drop-active" : ""}`}
+                onClick={() => !busy && fileRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setDrag(true); }}
+                onDragLeave={() => setDrag(false)}
+                onDrop={e => { e.preventDefault(); setDrag(false); if (!busy) pickUpload(e.dataTransfer.files?.[0]); }}>
+                {upFile ? (
+                  <div>
+                    <div className="file-name"><Icon.doc /> {upFile.name}</div>
+                    <div className="help-text">{fmtSize(upFile.size)} · {s.wizard.uploadChange}</div>
+                  </div>
+                ) : <div>{s.wizard.uploadPick}</div>}
+                <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }}
+                  onChange={e => { pickUpload(e.target.files?.[0]); e.target.value = ""; }} />
+              </div>
+              {upFile && (
+                <div style={{ marginTop: 10 }}>
+                  <label className="form-label sm">{s.wizard.uploadTitle}</label>
+                  <input className="input" maxLength={200} value={upTitle} onChange={e => setUpTitle(e.target.value)} />
+                </div>
+              )}
+            </>
+          ) : pdfDocs.length === 0
             ? <div className="empty-state">{s.wizard.noDocs}</div>
             : (
               <>
+                <p className="help-text">{s.wizard.docHelp}</p>
                 <input className="input" placeholder={s.wizard.searchDoc} value={q} onChange={e => setQ(e.target.value)} />
                 <div className="sign-doc-list">
                   {shown.slice(0, 60).map(d => (
