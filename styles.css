@@ -1160,3 +1160,9 @@ button { font: inherit; color: inherit; }
   .sign-trail-row { grid-template-columns: 1fr; gap: 2px; }
   .sign-trail-hash { text-align: left; }
 }
+
+/* Firmante: el botón de firmar nunca está muerto; si falta algo lo dice y señala el paso */
+.sign-missing { margin: 12px 0 0; }
+.sign-missing ul { margin: 6px 0 0; padding-left: 18px; }
+.sign-btn-pending { opacity: 0.75; }
+.sign-attn { outline: 3px solid var(--danger); outline-offset: 4px; border-radius: var(--radius); transition: outline-color 0.3s; }

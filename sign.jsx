@@ -867,6 +867,13 @@
         "La huella SHA-256 del documento y de tu firma",
       ],
       legal: "Firma electrónica simple reforzada · Reglamento (UE) 910/2014 (eIDAS), art. 25 · Ley 6/2020",
+      missing: "Para poder firmar te falta:",
+      need: {
+        read: "Recorrer el documento hasta el final", otp: "Verificar el código que te enviamos por correo (paso 1)",
+        id: "Escribir tu DNI / NIE / pasaporte", draw: "Dibujar tu firma en el recuadro", typed: "Escribir tu nombre completo",
+        accept: "Marcar «He leído y acepto la declaración»",
+      },
+      haveCode: "¿Ya tienes el código? Escríbelo aquí:",
     },
     en: {
       loading: "Loading the document…", invalid: "Invalid link",
@@ -894,6 +901,13 @@
         "The SHA-256 fingerprint of the document and of your signature",
       ],
       legal: "Advanced-grade simple electronic signature · Regulation (EU) 910/2014 (eIDAS), art. 25",
+      missing: "Before you can sign you still need to:",
+      need: {
+        read: "Scroll through the document to the end", otp: "Verify the code we emailed you (step 1)",
+        id: "Enter your ID / passport number", draw: "Draw your signature in the box", typed: "Type your full name",
+        accept: "Tick «I have read and accept the declaration»",
+      },
+      haveCode: "Already have the code? Enter it here:",
     },
     de: {
       loading: "Dokument wird geladen…", invalid: "Ungültiger Link",
@@ -921,6 +935,13 @@
         "Der SHA-256-Fingerabdruck des Dokuments und deiner Unterschrift",
       ],
       legal: "Fortgeschrittene einfache elektronische Signatur · Verordnung (EU) 910/2014 (eIDAS), Art. 25",
+      missing: "Zum Unterschreiben fehlt noch:",
+      need: {
+        read: "Das Dokument bis zum Ende durchscrollen", otp: "Den per E-Mail gesendeten Code bestätigen (Schritt 1)",
+        id: "Ausweis-/Passnummer eingeben", draw: "Unterschrift im Feld zeichnen", typed: "Vollständigen Namen eingeben",
+        accept: "«Ich habe die Erklärung gelesen und akzeptiere sie» ankreuzen",
+      },
+      haveCode: "Code schon erhalten? Hier eingeben:",
     },
   };
 
@@ -969,6 +990,13 @@
     const [err, setErr] = useState("");
     const [done, setDone] = useState(false);
     const [declined, setDeclined] = useState(false);
+    const [showMissing, setShowMissing] = useState(false);
+    const [signErr, setSignErr] = useState("");
+    const otpRef = useRef(null);
+    const idRef = useRef(null);
+    const sigRef = useRef(null);
+    const acceptRef = useRef(null);
+    const readRef = useRef(null);
 
     const boxRef = useRef(null);
     const startedAt = useRef(Date.now());
@@ -1103,13 +1131,32 @@
       catch (e) { setErr(e.message); }
       setBusy(false);
     };
-    const doVerify = async () => {
+    const doVerify = async (c = code) => {
       setErr(""); setBusy(true);
-      try { await callSign("verify", { t: token, code }, { anon: true }); setVerified(true); }
+      try { await callSign("verify", { t: token, code: c }, { anon: true }); setVerified(true); }
       catch (e) { setErr(e.message); }
       setBusy(false);
     };
+    // Con 6 dígitos se verifica solo: quien pegaba el código y bajaba directo a
+    // firmar sin pulsar «Verificar» se encontraba el botón de firmar muerto.
+    const onCode = (raw) => {
+      const c = raw.replace(/\D/g, "").slice(0, 6);
+      setCode(c);
+      if (c.length === 6 && !busy && !verified) doVerify(c);
+    };
     const doSign = async () => {
+      // El botón nunca se queda mudo: si falta algo se dice qué y se lleva allí.
+      setSignErr("");
+      if (missing.length) {
+        setShowMissing(true);
+        const el = missing[0].ref.current;
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("sign-attn");
+          setTimeout(() => el.classList.remove("sign-attn"), 1800);
+        }
+        return;
+      }
       setErr(""); setBusy(true);
       try {
         await callSign("sign", {
@@ -1117,7 +1164,7 @@
           typedName, signaturePng: sigPng,
         }, { anon: true });
         setDone(true);
-      } catch (e) { setErr(e.message); setBusy(false); }
+      } catch (e) { setSignErr(e.message); setBusy(false); }
     };
     const doDecline = async () => {
       const reason = prompt(v.declineWhy) ?? null;
@@ -1158,11 +1205,17 @@
     );
     if (blocked) return <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}><div className="sign-result"><h2>{data.title}</h2><p>{blocked}</p></div></SignShell>;
 
-    const canSign = accepted
-      && (!data.requireRead || readDone)
-      && (!data.requireOtp || verified)
-      && (!data.requireId || idNumber.trim())
-      && (data.signatureKind === "typed" ? typedName.trim().length > 2 : !!sigPng);
+    // Lo que aún impide firmar, en el orden de la página. El servidor vuelve a
+    // exigirlo todo; esto solo sirve para decírselo al firmante.
+    const missing = [
+      data.requireRead && !readDone && { label: v.need.read, ref: readRef },
+      data.requireOtp && !verified && { label: v.need.otp, ref: otpRef },
+      data.requireId && !idNumber.trim() && { label: v.need.id, ref: idRef },
+      data.signatureKind === "typed"
+        ? typedName.trim().length <= 2 && { label: v.need.typed, ref: sigRef }
+        : !sigPng && { label: v.need.draw, ref: sigRef },
+      !accepted && { label: v.need.accept, ref: acceptRef },
+    ].filter(Boolean);
 
     return (
       <SignShell hotel={data?.hotel} lang={lang} setLang={setLang} legal={v.legal}>
@@ -1182,7 +1235,7 @@
           )}
         </div>
 
-        <div className={`sign-read-bar ${readDone ? "ok" : ""}`}>
+        <div ref={readRef} className={`sign-read-bar ${readDone ? "ok" : ""}`}>
           {readDone
             ? v.readOk
             : <>{v.readFirst} <span className="sign-read-count">{v.pageOf} {pagesSeen}/{totalPages || data.pageCount || "?"}{readSecs < minSeconds ? ` · ${minSeconds - readSecs}s` : ""}</span></>}
@@ -1192,23 +1245,20 @@
           {err && <div className="form-error">{err}</div>}
 
           {data.requireOtp && (
-            <div className="sign-step">
+            <div className="sign-step" ref={otpRef}>
               <h3>{v.step1}</h3>
               {verified ? <div className="sign-ok">{v.verified}</div> : (
                 <>
-                  {!otpSent
-                    ? <button className="btn btn-primary" disabled={busy} onClick={askCode}>{v.sendCode}</button>
-                    : (
-                      <>
-                        <p className="help-text">{otpMsg}</p>
-                        <div className="sign-otp-row">
-                          <input className="input sign-otp" inputMode="numeric" maxLength={6} placeholder={v.codePh}
-                            value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} />
-                          <button className="btn btn-primary" disabled={busy || code.length !== 6} onClick={doVerify}>{v.verify}</button>
-                          <button className="btn btn-sm" disabled={busy} onClick={askCode}>{v.resend}</button>
-                        </div>
-                      </>
-                    )}
+                  {!otpSent && <button className="btn btn-primary" disabled={busy} onClick={askCode}>{v.sendCode}</button>}
+                  {/* La casilla del código está siempre: quien recarga la página con el
+                      código ya en el correo no tiene que pedir otro (que anula el primero). */}
+                  <p className="help-text" style={{ marginTop: otpSent ? 0 : 10 }}>{otpSent ? otpMsg : v.haveCode}</p>
+                  <div className="sign-otp-row">
+                    <input className="input sign-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder={v.codePh}
+                      value={code} onChange={e => onCode(e.target.value)} />
+                    <button className="btn btn-primary" disabled={busy || code.length !== 6} onClick={() => doVerify()}>{v.verify}</button>
+                    {otpSent && <button className="btn btn-sm" disabled={busy} onClick={askCode}>{v.resend}</button>}
+                  </div>
                 </>
               )}
             </div>
@@ -1217,28 +1267,36 @@
           <div className="sign-step">
             <h3>{v.step2}</h3>
             {data.requireId && (
-              <div className="sign-field">
+              <div className="sign-field" ref={idRef}>
                 <label className="form-label sm">{v.idLabel}</label>
                 <input className="input" value={idNumber} onChange={e => setIdNumber(e.target.value.toUpperCase())} />
               </div>
             )}
             {data.signatureKind === "typed" ? (
-              <div className="sign-field">
+              <div className="sign-field" ref={sigRef}>
                 <label className="form-label sm">{v.typedLabel}</label>
                 <input className="input sign-typed" value={typedName} onChange={e => setTypedName(e.target.value)} />
               </div>
-            ) : <SignaturePad onChange={setSigPng} />}
+            ) : <div ref={sigRef}><SignaturePad onChange={setSigPng} /></div>}
           </div>
 
           <div className="sign-step">
             <h3>{v.step3}</h3>
             <div className="sign-consent">{data.consentText}</div>
-            <label className="check-row">
+            <label className="check-row" ref={acceptRef}>
               <input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} />
               <span><strong>{v.accept}</strong></span>
             </label>
+            {/* Junto al botón y no arriba del panel: ahí es donde está mirando quien pulsa. */}
+            {showMissing && missing.length > 0 && (
+              <div className="form-error sign-missing">
+                <strong>{v.missing}</strong>
+                <ul>{missing.map((m, i) => <li key={i}>{m.label}</li>)}</ul>
+              </div>
+            )}
+            {signErr && <div className="form-error sign-missing">{signErr}</div>}
             <div className="sign-actions">
-              <button className="btn btn-primary btn-lg" disabled={!canSign || busy} onClick={doSign}>
+              <button className={`btn btn-primary btn-lg ${missing.length ? "sign-btn-pending" : ""}`} disabled={busy} onClick={doSign}>
                 {busy ? v.signing : v.sign}
               </button>
               <button className="btn" disabled={busy} onClick={doDecline}>{v.decline}</button>
