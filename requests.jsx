@@ -2,6 +2,8 @@
 
 function RequestsPage({ state, setState, t, lang, log }) {
   const [editingId, setEditingId] = React.useState(null);
+  const [fromTpl, setFromTpl] = React.useState(false);
+  const [showTpls, setShowTpls] = React.useState(false);
   const [filter, setFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
   const allRequests = state.requests || [];
@@ -11,7 +13,7 @@ function RequestsPage({ state, setState, t, lang, log }) {
     if (new Date(r.expiresAt) < new Date()) return "expired";
     const days = Math.floor((new Date(r.expiresAt) - new Date()) / 86400000);
     if (days <= 7) return "expiring";
-    if (r.savedAt && r.items.some(i => i.files?.length)) return "inprogress";
+    if (r.savedAt && (r.items.some(i => i.files?.length) || Object.keys(r.formAnswers || {}).length)) return "inprogress";
     return "pending";
   };
 
@@ -43,6 +45,24 @@ function RequestsPage({ state, setState, t, lang, log }) {
     setState(s => ({ ...s, requests: s.requests.filter(x => x.id !== id) }));
     log("request_delete", r?.title || id);
   };
+
+  if (showTpls) return <window.FormTemplatesPage state={state} t={t} onBack={() => setShowTpls(false)} />;
+
+  const createFromTemplate = (req) => {
+    setState(s => ({ ...s, requests: [...(s.requests || []), req] }));
+    log("request_create", req.title);
+    setFromTpl(false); setFilter("all"); setQuery("");
+    setEditingId(req.id);
+  };
+
+  if (editingId !== null && editing?.formSpec) {
+    return <window.FormRequestView key={editing.id} state={state} setState={setState} t={t} lang={lang} log={log} request={editing} onCancel={() => setEditingId(null)} />;
+  }
+  if (editingId !== null && editingId !== "new" && !editing) {
+    // recién creada: el estado aún no la ha devuelto en esta pasada
+    const just = allRequests.find(r => r.id === editingId);
+    if (just?.formSpec) return <window.FormRequestView key={just.id} state={state} setState={setState} t={t} lang={lang} log={log} request={just} onCancel={() => setEditingId(null)} />;
+  }
 
   if (editingId !== null) {
     return <RequestEditor state={state} setState={setState} t={t} lang={lang} log={log} request={editing} onSave={save} onCancel={() => setEditingId(null)} />;
@@ -87,8 +107,13 @@ function RequestsPage({ state, setState, t, lang, log }) {
           <h1 className="page-title">{t.requests?.title || "Solicitudes de documentación"}</h1>
           <div className="page-sub">{t.requests?.subtitle || "Solicita documentos a empleados, proveedores o terceros mediante un enlace temporal"}</div>
         </div>
-        <button className="btn btn-primary" onClick={create}><Icon.plus /> {t.requests?.newRequest || "Nueva solicitud"}</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setShowTpls(true)}>Plantillas</button>
+          <button className="btn" onClick={() => setFromTpl(true)}>📋 Con cuestionario</button>
+          <button className="btn btn-primary" onClick={create}><Icon.plus /> {t.requests?.newRequest || "Nueva solicitud"}</button>
+        </div>
       </div>
+      {fromTpl && <window.FormFromTemplateModal state={state} t={t} onCreate={createFromTemplate} onClose={() => setFromTpl(false)} onManage={() => { setFromTpl(false); setShowTpls(true); }} />}
 
       {allRequests.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '8px 0 16px' }}>
@@ -124,8 +149,9 @@ function RequestsPage({ state, setState, t, lang, log }) {
         <div className="proj-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, marginTop: 20 }}>
           {requests.map(r => {
             const st = statusInfo(r);
-            const total = r.items.length;
-            const filled = r.items.filter(i => (i.files || []).length > 0).length;
+            const fp = r.formSpec ? window.DocuForm.progress(r.formSpec, r.formAnswers) : null;
+            const total = fp ? fp.total : r.items.length;
+            const filled = fp ? fp.done : r.items.filter(i => (i.files || []).length > 0).length;
             return (
               <div key={r.id} className="proj-card" style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 18, background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer' }}
                 onClick={() => setEditingId(r.id)}
@@ -137,7 +163,7 @@ function RequestsPage({ state, setState, t, lang, log }) {
                     <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.3, marginBottom: 4 }}>{r.title}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
                       <span className="pill" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
-                      <span>· {filled}/{total} {t.requests?.docs || "documentos"}</span>
+                      <span>· {filled}/{total} {fp ? "puntos" : (t.requests?.docs || "documentos")}</span>
                     </div>
                   </div>
                   <button className="icon-btn" onClick={e => { e.stopPropagation(); remove(r.id); }}><Icon.trash /></button>

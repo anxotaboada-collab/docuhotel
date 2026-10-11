@@ -34,6 +34,7 @@ const FILES = [
   "public.jsx",
   "projects.jsx",
   "audit.jsx",
+  "forms.jsx",
   "requests.jsx",
   "sign.jsx",
   "regional.jsx",
@@ -50,7 +51,7 @@ const BUNDLE_HREF_RE = /docuhotel\.bundle\.js(?:\?v=[a-f0-9]+)?/g;
 // /api.jsx or /supabase/schema.sql. dist/ is rebuilt from scratch on
 // every build, so anything we forget to copy here is simply not shipped.
 const DIST = "dist";
-const STATIC_FILES = ["styles.css", "config.js"];
+const STATIC_FILES = ["styles.css", "config.js", "formulario.html"];
 const STATIC_DIRS = ["vendor"];
 
 async function buildOnce() {

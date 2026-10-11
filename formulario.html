@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Solicitud de documentación · Docuhotel</title>
+<style>
+:root{--ink:#1d1d1b;--muted:#6b6b66;--line:#e4e4e1;--bg:#fff;--soft:#f6f6f4;--ok:#1F7A4D;--okbg:#E7F5EE;--warn:#9A5B00;--warnbg:#FFF4DC;--err:#A12A1F;--errbg:#FDECEA;--acc:#1f1f1f;--blue:#2563EB}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#f1f1ef;color:var(--ink);font-size:14px}
+.top{background:#fff;border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+.mark{width:28px;height:28px;border-radius:7px;background:var(--acc);color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px}
+.top b{font-size:14px}.top span{color:var(--muted);font-size:13px}
+.wrap{max-width:860px;margin:0 auto;padding:22px 16px 60px}
+.banner{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px}
+.banner h1{font-size:20px;margin-bottom:4px}.banner p{color:var(--muted);font-size:13px;line-height:1.5}
+.steps{display:flex;gap:4px;margin:14px 0 6px;flex-wrap:wrap}
+.steps i{flex:1;min-width:18px;height:6px;border-radius:3px;background:var(--line);cursor:pointer}
+.steps i.done{background:var(--ok)}.steps i.cur{background:var(--acc)}
+.stepinfo{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.sec{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.sec h2{font-size:17px;margin-bottom:2px}.sec .sub{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+.q{border:1px solid var(--line);border-radius:10px;padding:14px 15px;margin-bottom:10px}
+.q.okq{border-color:#BFE3CF;background:#FBFEFC}.q.noq{border-color:#F0D49A;background:#FFFDF7}
+.qh{display:flex;gap:10px;align-items:flex-start}
+.qn{font-size:11px;font-weight:700;color:var(--muted);padding-top:2px;min-width:22px}
+.qt{flex:1}.qt b{font-size:14.5px;font-weight:600;display:block}
+.why{font-size:11.5px;color:var(--muted);margin-top:3px}
+.why em{font-style:normal;background:var(--soft);border-radius:4px;padding:1px 6px;margin-right:6px;color:#444}
+.prev{font-size:12.5px;background:#EEF3FE;color:#1E3A8A;border-radius:8px;padding:8px 10px;margin:10px 0 0 32px}
+.opts{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0 32px}
+.opt{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;font-weight:500}
+.opt.sel{background:var(--acc);color:#fff;border-color:var(--acc)}
+.opt.selno{background:var(--warn);color:#fff;border-color:var(--warn)}
+.det{margin:10px 0 0 32px;display:grid;gap:8px}
+.drop{border:2px dashed var(--line);border-radius:8px;padding:12px;text-align:center;color:var(--muted);font-size:12.5px;cursor:pointer}
+.file{background:var(--okbg);color:var(--ok);border-radius:6px;padding:7px 10px;font-size:12.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;flex:1;min-width:150px}
+input,textarea,select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+textarea{min-height:56px;resize:vertical}
+.st{font-size:11px;font-weight:700;border-radius:20px;padding:3px 9px;white-space:nowrap}
+.st.ok{background:var(--okbg);color:var(--ok)}.st.no{background:var(--warnbg);color:var(--warn)}.st.pend{background:var(--soft);color:var(--muted)}
+.nav{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer}
+.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.falta{font-size:12.5px;color:var(--err)}
+.nota{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+.res{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-top:14px}
+.res h3{font-size:15px;margin-bottom:10px}
+.res table{width:100%;border-collapse:collapse;font-size:12.5px}
+.res td,.res th{border-bottom:1px solid var(--line);padding:6px 4px;text-align:left}
+.res th{font-size:10.5px;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}
+.hidden{display:none}
+</style>
+
+<style>
+.drop.busy{border-color:var(--blue);color:var(--blue)}
+.file{display:flex;align-items:center;gap:8px}.file span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file button{border:0;background:transparent;color:var(--ok);cursor:pointer;font-size:13px;padding:0 2px}
+.drop.mini{padding:7px;font-size:12px}
+.saved{color:var(--ok)}.saveerr{color:var(--err)}
+.fin{background:var(--okbg);border:1px solid #BFE3CF;border-radius:12px;padding:16px 20px;margin-bottom:14px;color:var(--ok);font-size:14px;line-height:1.5}
+.fin b{display:block;font-size:16px;margin-bottom:2px}
+@media print{.top,.nav,.steps,.stepinfo,.nota,#sec{display:none!important}.res{border:0;padding:0}body{background:#fff}}
+</style></head><body>
+<div class="top"><div class="mark">DH</div><b>Docuhotel</b><span>— Solicitud de documentación</span></div>
+<div class="wrap">
+  <div class="banner">
+    <h1 id="titulo">Cargando…</h1>
+    <p id="intro"></p>
+    <div class="steps" id="steps"></div>
+    <div class="stepinfo"><span id="stepTxt"></span><span id="totTxt"></span></div>
+  </div>
+  <div id="fin"></div>
+  <div class="sec" id="sec"></div>
+  <div class="nav hidden" id="nav"><button class="btn" id="ant">← Anterior</button><span class="falta" id="falta"></span><button class="btn pri" id="sig">Siguiente →</button></div>
+  <div class="res hidden" id="res"></div>
+  <p class="nota" id="nota">Se guarda solo: puedes cerrar y seguir otro día con este mismo enlace.</p>
+</div>
+<input type="file" id="fileIn" class="hidden">
+<script src="vendor/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+// Formulario por bloques de una solicitud de Docuhotel (requests.form_spec).
+// Mismo aspecto que la maqueta aprobada; las preguntas vienen de la plantilla y
+// las respuestas se guardan en requests.form_answers con el RPC request_form_save.
+// Tipos de pregunta: dato (opciones) · equipo (¿sigue instalado?) · doc (subir o «no lo tengo»)
+const cfg = window.DOCUHOTEL_CONFIG || {};
+const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+const BUCKET = cfg.storageBucket || 'docuhotel';
+const QS = new URLSearchParams(location.search);
+const TOKEN = QS.get('t') || '';
+const PREVIEW = QS.get('preview') === '1'; // vista previa de una plantilla: no guarda ni sube nada
+const $ = id => document.getElementById(id);
+const fecha = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d||''); return m ? `${m[3]}/${m[2]}/${m[1]}` : esc(d); };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S = [], A = {}, cur = 0, REQ = null, ITEMS = new Set(), CERRADO = false, subiendo = null;
+
+const vis = q => !q.si || Object.entries(q.si).every(([k,v]) => (A[k]||{}).v === v);
+const files = a => (a && a.files) || [];
+function hecho(q){
+  const a = A[q.id]||{};
+  if (q.k==='dato') return !!a.v;
+  if (q.k==='equipo') return a.v==='si' ? (!q.dsi || files(a).length>0 || a.noDoc) : a.v==='no' ? !!(a.txt && a.txt.trim()) : false;
+  if (a.v==='no') return true;
+  if (a.v==='si') return files(a).length>0 && (!q.f || !!a.fecha) && (!q.r || !!a.res);
+  return false;
+}
+const lista = (id, multi) => files(A[id]).map(f => `<div class="file"><span>📄 ${esc(f.name)} · ${Math.max(1,Math.round((f.size||0)/1024))} KB</span>${CERRADO?'':`<button title="Quitar" data-del="${id}" data-fid="${esc(f.id)}">✕</button>`}</div>`).join('');
+const subir = (id, txt, multi) => {
+  const fs = files(A[id]);
+  if (subiendo === id) return `<div class="drop busy">⏳ Subiendo…</div>`;
+  if (fs.length && !multi) return lista(id);
+  return lista(id) + `<div class="drop ${fs.length?'mini':''}" data-up="${id}">📎 ${fs.length?'Añadir otro documento':txt} · toca o arrastra</div>`;
+};
+function pinta(){
+  const s = S[cur], qs = s.q.filter(vis);
+  let h = `<h2>${cur+1}. ${esc(s.t)}</h2><div class="sub">${s.sub?esc(s.sub):'&nbsp;'}</div>`;
+  qs.forEach((q,i) => {
+    const a = A[q.id]||{}, ok = hecho(q), why = q.why||[];
+    const est = ok ? (a.v==='no' && q.k==='doc' ? '<span class="st no">No lo tiene</span>' : '<span class="st ok">✓ Hecho</span>') : '<span class="st pend">Pendiente</span>';
+    h += `<div class="q ${ok?(a.v==='no'&&q.k==='doc'?'noq':'okq'):''}"><div class="qh"><span class="qn">${String(i+1).padStart(2,'0')}</span><div class="qt"><b>${esc(q.t)}</b>${why.length?`<div class="why">${why.map((w,j)=>j?esc(w):`<em>${esc(w)}</em>`).join('')}</div>`:''}</div>${est}</div>`;
+    if (q.prev) h += `<div class="prev">ℹ Lo que sabemos: ${esc(q.prev)}</div>`;
+    if (q.k==='dato') h += `<div class="opts">${(q.op||[]).map(o=>`<button class="opt ${a.v===o?'sel':''}" data-q="${q.id}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+    else if (q.k==='equipo') {
+      h += `<div class="opts"><span style="font-size:13px;color:var(--muted);align-self:center">${esc(q.pre||'¿Sigue instalado?')}</span><button class="opt ${a.v==='si'?'sel':''}" data-q="${q.id}" data-v="si">Sí</button><button class="opt ${a.v==='no'?'selno':''}" data-q="${q.id}" data-v="no">No</button></div>`;
+      if (a.v==='si' && q.dsi) h += `<div class="det">${a.noDoc?`<div class="file" style="background:var(--warnbg);color:var(--warn)"><span>Sin documento</span><button style="color:var(--warn)" data-nodoc="${q.id}">Deshacer</button></div>`:subir(q.id, esc(q.dsi))+(files(a).length?'':`<button class="opt" style="justify-self:start" data-nodoc="${q.id}">No tengo el documento</button>`)}</div>`;
+      if (a.v==='no') h += `<div class="det"><label style="font-size:12px;color:var(--muted)">${esc(q.dno||'¿Por cuál se ha sustituido? Marca, modelo, potencia y fecha')}</label><textarea data-txt="${q.id}" placeholder="Ej.: caldera 2 sustituida en 2024 por …">${esc(a.txt)}</textarea></div>`;
+    } else {
+      h += `<div class="opts"><button class="opt ${a.v==='si'?'sel':''}" data-q="${q.id}" data-v="si">Sí, lo tengo</button><button class="opt ${a.v==='no'?'selno':''}" data-q="${q.id}" data-v="no">${esc(q.noTxt||'No lo tengo')}</button></div>`;
+      if (a.v==='si') {
+        h += `<div class="det">${subir(q.id, 'Sube el documento'+(q.multi?' (uno por equipo)':''), q.multi)}`;
+        if (q.f||q.r) h += `<div class="row">${q.f?`<label>${q.f==='caducidad'?'Caduca el':'Fecha del documento'}<input type="date" data-fecha="${q.id}" value="${esc(a.fecha)}"></label>`:''}${q.r?`<label>Resultado<select data-res="${q.id}"><option value="">—</option>${['Favorable','Con defectos leves','Condicionada','Desfavorable'].map(o=>`<option ${a.res===o?'selected':''}>${o}</option>`).join('')}</select></label>`:''}</div>`;
+        h += `</div>`;
+      }
+      if (a.v==='no') h += `<div class="det"><textarea data-txt="${q.id}" placeholder="Comentario (opcional): ¿se ha pedido?, ¿quién lo tiene?">${esc(a.txt)}</textarea></div>`;
+    }
+    h += `</div>`;
+  });
+  $('sec').innerHTML = h;
+  $('nav').classList.remove('hidden');
+  faltaTxt();
+  $('sig').textContent = cur===S.length-1 ? 'Enviar ✓' : 'Siguiente →';
+  $('ant').disabled = cur===0;
+  $('steps').innerHTML = S.map((x,i)=>`<i class="${i===cur?'cur':(x.q.filter(vis).every(hecho)?'done':'')}" title="${esc(x.t)}"></i>`).join('');
+  $('stepTxt').textContent = `Bloque ${cur+1} de ${S.length} · ${s.t}`;
+  const all = S.flatMap(x=>x.q.filter(vis)); $('totTxt').textContent = `${all.filter(hecho).length} de ${all.length} puntos contestados`;
+}
+function faltaTxt(){
+  const f = S[cur].q.filter(vis).filter(q=>!hecho(q)).length;
+  $('sig').disabled = !!f || !!subiendo;
+  $('falta').textContent = f ? (f===1?'Falta 1 punto por contestar':`Faltan ${f} puntos por contestar`) : '';
+}
+
+// ── guardado ──
+let tGuarda = null, guardando = Promise.resolve();
+function guardaLuego(){ clearTimeout(tGuarda); $('nota').textContent = 'Guardando…'; $('nota').className='nota'; tGuarda = setTimeout(guarda, 700); }
+function guarda(){
+  clearTimeout(tGuarda);
+  if (PREVIEW) { $('nota').textContent = 'Vista previa: no se guarda nada.'; return Promise.resolve(); }
+  guardando = guardando.then(async () => {
+    const { data, error } = await sb.rpc('request_form_save', { p_token: TOKEN, p_answers: A });
+    if (error) { $('nota').textContent = '⚠ No se pudo guardar: ' + (error.message||error) + '. Revisa la conexión; no cierres la página.'; $('nota').className='nota saveerr'; throw error; }
+    const hh = new Date(data || Date.now()).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    $('nota').innerHTML = `<span class="saved">✓ Guardado a las ${hh}</span> · puedes cerrar y seguir otro día con este mismo enlace.`; $('nota').className='nota';
+  }).catch(()=>{});
+  return guardando;
+}
+const log = (action, details) => PREVIEW ? Promise.resolve() : sb.rpc('request_log_append', { p_token: TOKEN, p_action: action, p_details: details||'' }).then(()=>{}, ()=>{});
+
+// ── subida de documentos (mismo sitio que las solicitudes normales: requests/<req>/<item>/…) ──
+let upId = null;
+async function subeFichero(id, file){
+  if (!file) return;
+  const max = (REQ.max_file_size_mb || 25) * 1024 * 1024;
+  if (file.size > max) { alert(`El archivo pesa ${(file.size/1048576).toFixed(1)} MB y el máximo es ${REQ.max_file_size_mb||25} MB.`); return; }
+  if (PREVIEW) { A[id] = Object.assign({}, A[id]); A[id].files = files(A[id]).concat([{ id: 'p'+Date.now(), name: file.name, size: file.size }]); pinta(); return; }
+  const itemId = `${REQ.id}__${id}`;
+  if (!ITEMS.has(itemId)) { alert('Este punto no admite documentos. Avisa a quien te envió el enlace.'); return; }
+  subiendo = id; pinta();
+  try {
+    const uid = 'up_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+    const safe = file.name.replace(/[^\w.\-]+/g, '_');
+    const key = `requests/${REQ.id}/${itemId}/${uid}_${safe}`;
+    const up = await sb.storage.from(BUCKET).upload(key, file, { cacheControl: '3600', upsert: false, contentType: file.type || 'application/octet-stream' });
+    if (up.error) throw up.error;
+    const ins = await sb.from('request_uploads').insert({ id: uid, request_item_id: itemId, file_key: key, file_name: file.name, file_size: file.size, file_mime: file.type || null });
+    if (ins.error) throw ins.error;
+    A[id] = Object.assign({}, A[id]); A[id].files = files(A[id]).concat([{ id: uid, name: file.name, size: file.size, key }]);
+    log('upload', `${tituloDe(id)}: ${file.name} (${Math.round(file.size/1024)} KB)`);
+    await guarda();
+  } catch (e) { alert('No se pudo subir el archivo: ' + (e.message || e) + '\nComprueba la conexión y vuelve a intentarlo.'); }
+  subiendo = null; pinta();
+}
+async function quitaFichero(id, fid){
+  if (!confirm('¿Quitar este documento?')) return;
+  if (PREVIEW) { A[id].files = files(A[id]).filter(x=>x.id!==fid); pinta(); return; }
+  const { error } = await sb.rpc('request_upload_delete', { p_token: TOKEN, p_upload_id: fid });
+  if (error) { alert('No se pudo quitar: ' + error.message); return; }
+  const f = files(A[id]).find(x=>x.id===fid);
+  A[id].files = files(A[id]).filter(x=>x.id!==fid);
+  log('delete', `${tituloDe(id)}: ${f?f.name:fid}`);
+  pinta(); guarda();
+}
+const tituloDe = id => (S.flatMap(s=>s.q).find(q=>q.id===id)||{}).t || id;
+
+document.addEventListener('click', e => {
+  if (CERRADO) return;
+  const b = e.target.closest('[data-q]'); if (b) { const id=b.dataset.q; A[id] = Object.assign({}, A[id], {v:b.dataset.v}); pinta(); guardaLuego(); return; }
+  const nd = e.target.closest('[data-nodoc]'); if (nd) { const id=nd.dataset.nodoc; A[id].noDoc = !A[id].noDoc; pinta(); guardaLuego(); return; }
+  const d = e.target.closest('[data-del]'); if (d) { quitaFichero(d.dataset.del, d.dataset.fid); return; }
+  const u = e.target.closest('[data-up]'); if (u && !subiendo) { upId = u.dataset.up; $('fileIn').value=''; $('fileIn').click(); return; }
+  const st = e.target.closest('.steps i'); if (st) { cur=[...st.parentNode.children].indexOf(st); pinta(); }
+});
+$('fileIn').addEventListener('change', e => { const f = e.target.files[0]; if (f && upId) subeFichero(upId, f); });
+document.addEventListener('dragover', e => { if (e.target.closest('[data-up]')) e.preventDefault(); });
+document.addEventListener('drop', e => { const u = e.target.closest('[data-up]'); if (!u || CERRADO) return; e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !subiendo) subeFichero(u.dataset.up, f); });
+document.addEventListener('input', e => {
+  if (CERRADO) return;
+  const t=e.target, d=t.dataset;
+  if (d.txt) { A[d.txt].txt=t.value; faltaTxt(); guardaLuego(); }
+  if (d.fecha) { A[d.fecha].fecha=t.value; pinta(); guardaLuego(); }
+  if (d.res) { A[d.res].res=t.value; pinta(); guardaLuego(); }
+});
+$('sig').onclick = async () => {
+  if (cur<S.length-1){ cur++; pinta(); window.scrollTo(0,0); guarda(); return; }
+  if (PREVIEW) { resumen('Vista previa: así lo verías al enviar'); $('res').scrollIntoView({behavior:'smooth'}); return; }
+  if (!confirm('¿Enviar definitivamente? Después ya no podrás cambiar las respuestas ni subir más documentos.')) return;
+  $('sig').disabled = true;
+  await guarda();
+  const { error } = await sb.rpc('request_submit', { p_token: TOKEN });
+  if (error) { alert('No se pudo enviar: ' + error.message); $('sig').disabled = false; return; }
+  log('submit', 'Envío definitivo del cuestionario');
+  cerrar(true);
+};
+$('ant').onclick = () => { if (cur>0){cur--;pinta();window.scrollTo(0,0);} };
+
+function resumen(titulo){
+  const el=$('res'); el.classList.remove('hidden');
+  el.innerHTML=`<h3>${esc(titulo)}</h3><table><tr><th>Bloque</th><th>Punto</th><th>Estado</th></tr>`+
+   S.flatMap((s,i)=>s.q.filter(vis).map(q=>{const a=A[q.id]||{};let est;
+     if(q.k==='dato')est=a.v?esc(a.v):'—';
+     else if(q.k==='equipo')est=a.v==='si'?'✓ Sigue igual'+(a.noDoc?' · sin documento':''):a.v==='no'?'✎ Cambiado: '+esc(a.txt):'—';
+     else est=a.v==='si'?'✓ '+files(a).map(f=>esc(f.name)).join(', ')+(a.fecha?' · '+fecha(a.fecha):'')+(a.res?' · '+esc(a.res):''):a.v==='no'?'✗ No lo tiene'+(a.txt?' · '+esc(a.txt):''):'—';
+     return `<tr><td>${i+1}. ${esc(s.t)}</td><td>${esc(q.t)}</td><td>${est}</td></tr>`;})).join('')+'</table>';
+}
+function cerrar(recien){
+  CERRADO = true;
+  ['sec','nav','nota','steps','stepinfo'].forEach(x=>{ const n=$(x)||document.querySelector('.'+x); if(n) n.classList.add('hidden'); });
+  document.querySelector('.stepinfo').classList.add('hidden');
+  const cuando = REQ.submitted_at ? new Date(REQ.submitted_at).toLocaleString('es-ES') : new Date().toLocaleString('es-ES');
+  $('fin').innerHTML = `<div class="fin"><b>✓ ${recien?'Enviado. ¡Gracias!':'Este cuestionario ya se envió'}</b>${recien?'Queda registrado en Docuhotel. ':''}Enviado el ${esc(cuando)}. Abajo tienes el resumen de lo que contestaste.</div>`;
+  resumen('Resumen de lo enviado');
+  window.scrollTo(0,0);
+}
+function error(msg){ $('titulo').textContent = 'Enlace no válido'; $('intro').textContent = msg; ['sec','nav','nota'].forEach(x=>$(x).classList.add('hidden')); }
+
+(async function boot(){
+  if (PREVIEW) {
+    let spec = null; try { spec = JSON.parse(localStorage.getItem('dh_form_preview') || 'null'); } catch {}
+    if (!spec || !spec.blocks || !spec.blocks.length) return error('No hay ninguna plantilla para previsualizar.');
+    REQ = { id: 'preview', title: 'Vista previa de la plantilla', max_file_size_mb: 25 };
+    S = spec.blocks.filter(b => b.q && b.q.length); A = {};
+    $('titulo').textContent = REQ.title; $('intro').innerHTML = 'Para: <b>Nombre del destinatario</b>. ' + esc(spec.intro || '');
+    $('nota').textContent = 'Vista previa: no se guarda nada.'; pinta(); return;
+  }
+  if (!TOKEN) return error('Falta el código del enlace. Ábrelo tal como te llegó en el correo.');
+  const { data, error: err } = await sb.rpc('request_by_token', { p_token: TOKEN });
+  if (err || !data || !data.request) return error('Este enlace no existe o se ha revocado. Pide uno nuevo a quien te lo envió.');
+  REQ = data.request;
+  const spec = REQ.form_spec;
+  if (!spec || !Array.isArray(spec.blocks) || !spec.blocks.length) { location.replace('./#/request/' + encodeURIComponent(TOKEN)); return; }
+  S = spec.blocks; A = REQ.form_answers || {};
+  ITEMS = new Set((data.items||[]).map(i=>i.id));
+  // los ficheros que siguen vivos en la BD mandan (por si se borró alguno desde Docuhotel)
+  const vivos = new Set((data.uploads||[]).map(u=>u.id));
+  Object.values(A).forEach(a => { if (a && a.files) a.files = a.files.filter(f => vivos.has(f.id)); });
+  document.title = REQ.title + ' · Docuhotel';
+  $('titulo').textContent = REQ.title;
+  $('intro').innerHTML = (REQ.recipient_name ? `Para: <b>${esc(REQ.recipient_name)}</b>. ` : '') + esc(spec.intro || '') + (REQ.notes ? ' ' + esc(REQ.notes) : '');
+  if (REQ.submitted_at || REQ.status === 'submitted') { cerrar(false); return; }
+  if (new Date(REQ.expires_at) < new Date()) return error('El enlace caducó el ' + new Date(REQ.expires_at).toLocaleDateString('es-ES') + '. Pide que te lo amplíen.');
+  // empieza en el primer bloque sin terminar
+  const p = S.findIndex(s => !s.q.filter(vis).every(hecho)); cur = p < 0 ? S.length-1 : p;
+  pinta();
+  if (REQ.saved_at) $('nota').innerHTML = `<span class="saved">✓ Último guardado: ${new Date(REQ.saved_at).toLocaleString('es-ES')}</span> · puedes cerrar y seguir otro día con este mismo enlace.`;
+})();
+</script>
+</body></html>

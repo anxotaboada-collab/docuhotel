@@ -183,6 +183,9 @@
     })),
     log: (log || []).map((l) => ({ ts: l.ts, action: l.action, details: l.details })),
     createdAt: r.created_at, updatedAt: r.updated_at,
+    templateId: r.template_id || null,
+    formSpec: r.form_spec || null,
+    formAnswers: r.form_answers || {},
   });
   const reqToRow = (r, hotelId) => ({
     id: r.id, hotel_id: hotelId,
@@ -195,6 +198,10 @@
     status: r.status || "open",
     saved_at: r.savedAt || null,
     submitted_at: r.submittedAt || null,
+    // Cuestionario: la spec se fija al crear la solicitud. form_answers NO va aquí:
+    // lo escribe el destinatario (RPC request_form_save) y un upsert desde un estado
+    // viejo le pisaría las respuestas.
+    ...(r.formSpec ? { form_spec: r.formSpec, template_id: r.templateId || null } : {}),
   });
 
   // ── Bootstrap: who am I + my hotel ──────────────────────────────────
@@ -644,6 +651,41 @@
     };
   }
 
+  // ── Plantillas de cuestionario (request_templates) ─────────────────
+  async function listTemplates() {
+    if (offline) return [];
+    const { data, error } = await client.from("request_templates").select("*").order("name");
+    if (error) { console.error("listTemplates", error); return []; }
+    return data || [];
+  }
+  async function saveTemplate(tpl) {
+    const row = { name: tpl.name, description: tpl.description || "", spec: tpl.spec, hotel_id: tpl.hotel_id || null, updated_at: new Date().toISOString() };
+    const q = tpl.id ? client.from("request_templates").update(row).eq("id", tpl.id).select().single()
+                     : client.from("request_templates").insert(row).select().single();
+    const { data, error } = await q;
+    if (error) throw error;
+    return data;
+  }
+  async function deleteTemplate(id) {
+    const { error } = await client.from("request_templates").delete().eq("id", id);
+    if (error) throw error;
+  }
+  // Respuestas y ficheros al día de una solicitud (el destinatario escribe sin pasar por el estado local).
+  async function requestFresh(id) {
+    if (offline) return null;
+    const [{ data: r }, { data: items }] = await Promise.all([
+      client.from("requests").select("*").eq("id", id).maybeSingle(),
+      client.from("request_items").select("*").eq("request_id", id).order("sort"),
+    ]);
+    if (!r) return null;
+    const ids = (items || []).map((i) => i.id);
+    const [{ data: ups }, { data: logs }] = await Promise.all([
+      ids.length ? client.from("request_uploads").select("*").in("request_item_id", ids) : Promise.resolve({ data: [] }),
+      client.from("request_log").select("*").eq("request_id", id).order("ts", { ascending: true }),
+    ]);
+    return reqFromRow(r, items, ups, logs);
+  }
+
   async function requestByToken(token) {
     if (offline) return null;
     const { data, error } = await client.rpc("request_by_token", { p_token: token });
@@ -863,6 +905,7 @@
     uploadRequestFile, copyToDocsPath, signedUrl, deleteFile,
     publicDocs, auditProject, requestByToken, requestLog,
     requestDeleteUpload, requestSaveProgress, requestSubmit,
+    listTemplates, saveTemplate, deleteTemplate, requestFresh,
     createHotel, listAccessibleHotels, regionalCreateDoc, saveDocumentRow, rehomeDocument, updateRegionalDocHotels, listRegionalUploads, listAllDocumentsForUser,
     listAllUsers, createAppUser, getUserHotels, setUserAccess,
     signIn, signOut, onAuthChange,
