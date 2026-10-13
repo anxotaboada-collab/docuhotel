@@ -91,7 +91,7 @@ textarea{min-height:56px;resize:vertical}
   <div class="res hidden" id="res"></div>
   <p class="nota" id="nota">Se guarda solo. Si quieres dejarlo para otro día, pulsa «Guardar y seguir en otro momento» y vuelve con este mismo enlace.</p>
 </div>
-<input type="file" id="fileIn" class="hidden">
+<input type="file" id="fileIn" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp">
 <script src="vendor/supabase.min.js"></script>
 <script src="config.js"></script>
 <script>
@@ -166,57 +166,90 @@ function pinta(){
   $('pctF').textContent = falta ? `Falta ${100-pc} % · ${falta} ${falta===1?'punto':'puntos'}` : '¡Todo contestado! Ya puedes enviarlo';
 }
 const progreso = () => { const all = S.flatMap(x=>x.q.filter(vis)); return { n: all.filter(hecho).length, total: all.length }; };
+// Se puede pasar de bloque aunque falten puntos (se guarda igual); solo el envío final exige todo.
 function faltaTxt(){
   const f = S[cur].q.filter(vis).filter(q=>!hecho(q)).length;
-  $('sig').disabled = !!f || !!subiendo;
-  $('falta').textContent = f ? (f===1?'Falta 1 punto por contestar':`Faltan ${f} puntos por contestar`) : '';
+  $('sig').disabled = !!subiendo;
+  $('falta').textContent = f ? (f===1?'Falta 1 punto (puedes seguir y volver luego)':`Faltan ${f} puntos (puedes seguir y volver luego)`) : '';
 }
 
-// ── guardado ──
-let tGuarda = null, guardando = Promise.resolve();
-function guardaLuego(){ clearTimeout(tGuarda); $('nota').textContent = 'Guardando…'; $('nota').className='nota'; tGuarda = setTimeout(guarda, 700); }
+// ── guardado: copia en el navegador al instante + servidor con reintentos ──
+const LS_KEY = 'dh_form_' + TOKEN;
+const copiaLocal = () => { if (PREVIEW || !TOKEN) return; try { localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), a: A })); } catch {} };
+let tGuarda = null, tReintento = null, guardando = Promise.resolve(), pendiente = false, fallos = 0;
+function guardaLuego(){ copiaLocal(); pendiente = true; clearTimeout(tGuarda); $('nota').textContent = 'Guardando…'; $('nota').className='nota'; tGuarda = setTimeout(guarda, 700); }
 function guarda(){
-  clearTimeout(tGuarda);
+  clearTimeout(tGuarda); clearTimeout(tReintento);
   if (PREVIEW) { $('nota').textContent = 'Vista previa: no se guarda nada.'; return Promise.resolve(); }
+  copiaLocal(); pendiente = true;
   guardando = guardando.then(async () => {
-    const { data, error } = await sb.rpc('request_form_save', { p_token: TOKEN, p_answers: A });
-    if (error) { $('nota').textContent = '⚠ No se pudo guardar: ' + (error.message||error) + '. Revisa la conexión; no cierres la página.'; $('nota').className='nota saveerr'; throw error; }
-    const hh = new Date(data || Date.now()).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    const r = await conTiempo(sb.rpc('request_form_save', { p_token: TOKEN, p_answers: A }), 20000);
+    if (r.error) throw r.error;
+    pendiente = false; fallos = 0;
+    const hh = new Date(r.data || Date.now()).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
     $('nota').innerHTML = `<span class="saved">✓ Guardado a las ${hh}</span> · puedes cerrar y seguir otro día con este mismo enlace.`; $('nota').className='nota';
-  }).catch(()=>{});
+  }).catch(e => {
+    fallos++;
+    const seg = Math.min(60, 5 * fallos);
+    $('nota').textContent = `⚠ Sin conexión con el servidor (${(e && e.message) || e}). Lo tienes guardado en este navegador; reintento automático en ${seg} s.`;
+    $('nota').className = 'nota saveerr';
+    tReintento = setTimeout(guarda, seg * 1000);
+  });
   return guardando;
 }
+// Promesa con límite de tiempo: nada se queda colgado esperando a la red
+function conTiempo(p, ms){ let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error('la conexión no responde')), ms); })]).finally(() => clearTimeout(t)); }
+window.addEventListener('online', () => { if (pendiente) guarda(); });
+window.addEventListener('offline', () => { if (!PREVIEW) { $('nota').textContent = '⚠ Sin internet. Lo que contestes se guarda en este navegador y se sube al volver la conexión.'; $('nota').className='nota saveerr'; } });
+window.addEventListener('beforeunload', e => { if (!CERRADO && (pendiente || subiendo)) { e.preventDefault(); e.returnValue = ''; } });
 const log = (action, details) => PREVIEW ? Promise.resolve() : sb.rpc('request_log_append', { p_token: TOKEN, p_action: action, p_details: details||'' }).then(()=>{}, ()=>{});
 
 // ── subida de documentos (mismo sitio que las solicitudes normales: requests/<req>/<item>/…) ──
 let upId = null;
+// Lo que admite el almacenamiento (bucket docuhotel): PDF y fotos
+const TIPOS = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+const tipoDe = f => { const ext = (f.name.split('.').pop() || '').toLowerCase(); return Object.values(TIPOS).includes(f.type) ? f.type : (TIPOS[ext] || ''); };
+async function subeFicheros(id, lst){
+  lst = [...(lst || [])]; if (!lst.length) return;
+  const q = S.flatMap(s=>s.q).find(x=>x.id===id) || {};
+  if (!q.multi && files(A[id]).length === 0) lst = lst.slice(0, 1);
+  for (const f of lst) { if (!(await subeFichero(id, f))) break; }
+}
 async function subeFichero(id, file){
-  if (!file) return;
+  if (!file) return false;
   const max = (REQ.max_file_size_mb || 25) * 1024 * 1024;
-  if (file.size > max) { alert(`El archivo pesa ${(file.size/1048576).toFixed(1)} MB y el máximo es ${REQ.max_file_size_mb||25} MB.`); return; }
-  if (PREVIEW) { A[id] = Object.assign({}, A[id]); A[id].files = files(A[id]).concat([{ id: 'p'+Date.now(), name: file.name, size: file.size }]); pinta(); return; }
+  if (file.size > max) { alert(`«${file.name}» pesa ${(file.size/1048576).toFixed(1)} MB y el máximo es ${REQ.max_file_size_mb||25} MB.`); return false; }
+  const mime = tipoDe(file);
+  if (!mime) { alert(`«${file.name}» no se puede subir: solo se admiten PDF o fotos (JPG, PNG).\nSi es un Word o un Excel, guárdalo como PDF (Archivo → Guardar como → PDF) y súbelo de nuevo.`); return false; }
+  if (PREVIEW) { A[id] = Object.assign({}, A[id]); A[id].files = files(A[id]).concat([{ id: 'p'+Date.now(), name: file.name, size: file.size }]); pinta(); return true; }
   const itemId = `${REQ.id}__${id}`;
-  if (!ITEMS.has(itemId)) { alert('Este punto no admite documentos. Avisa a quien te envió el enlace.'); return; }
+  if (!ITEMS.has(itemId)) { alert('Este punto no admite documentos. Avisa a quien te envió el enlace.'); return false; }
   subiendo = id; pinta();
+  let ok = false;
   try {
     const uid = 'up_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
     const safe = file.name.replace(/[^\w.\-]+/g, '_');
     const key = `requests/${REQ.id}/${itemId}/${uid}_${safe}`;
-    const up = await sb.storage.from(BUCKET).upload(key, file, { cacheControl: '3600', upsert: false, contentType: file.type || 'application/octet-stream' });
+    // tiempo máximo según tamaño (mínimo 90 s, unos 50 KB/s en la peor conexión)
+    const ms = Math.max(90000, Math.round(file.size / 50));
+    const up = await conTiempo(sb.storage.from(BUCKET).upload(key, file, { cacheControl: '3600', upsert: false, contentType: mime }), ms);
     if (up.error) throw up.error;
-    const ins = await sb.from('request_uploads').insert({ id: uid, request_item_id: itemId, file_key: key, file_name: file.name, file_size: file.size, file_mime: file.type || null });
+    const ins = await conTiempo(sb.from('request_uploads').insert({ id: uid, request_item_id: itemId, file_key: key, file_name: file.name, file_size: file.size, file_mime: mime }), 20000);
     if (ins.error) throw ins.error;
     A[id] = Object.assign({}, A[id]); A[id].files = files(A[id]).concat([{ id: uid, name: file.name, size: file.size, key }]);
     log('upload', `${tituloDe(id)}: ${file.name} (${Math.round(file.size/1024)} KB)`);
-    await guarda();
-  } catch (e) { alert('No se pudo subir el archivo: ' + (e.message || e) + '\nComprueba la conexión y vuelve a intentarlo.'); }
+    ok = true;
+  } catch (e) { alert(`No se pudo subir «${file.name}»: ${(e && e.message) || e}\nLo demás está guardado. Comprueba la conexión y vuelve a intentarlo.`); }
   subiendo = null; pinta();
+  if (ok) guarda();
+  return ok;
 }
 async function quitaFichero(id, fid){
   if (!confirm('¿Quitar este documento?')) return;
   if (PREVIEW) { A[id].files = files(A[id]).filter(x=>x.id!==fid); pinta(); return; }
-  const { error } = await sb.rpc('request_upload_delete', { p_token: TOKEN, p_upload_id: fid });
-  if (error) { alert('No se pudo quitar: ' + error.message); return; }
+  let error;
+  try { ({ error } = await conTiempo(sb.rpc('request_upload_delete', { p_token: TOKEN, p_upload_id: fid }), 20000)); } catch (e) { error = e; }
+  if (error) { alert('No se pudo quitar: ' + (error.message || error)); return; }
   const f = files(A[id]).find(x=>x.id===fid);
   A[id].files = files(A[id]).filter(x=>x.id!==fid);
   log('delete', `${tituloDe(id)}: ${f?f.name:fid}`);
@@ -230,11 +263,11 @@ document.addEventListener('click', e => {
   const nd = e.target.closest('[data-nodoc]'); if (nd) { const id=nd.dataset.nodoc; A[id].noDoc = !A[id].noDoc; pinta(); guardaLuego(); return; }
   const d = e.target.closest('[data-del]'); if (d) { quitaFichero(d.dataset.del, d.dataset.fid); return; }
   const u = e.target.closest('[data-up]'); if (u && !subiendo) { upId = u.dataset.up; $('fileIn').value=''; $('fileIn').click(); return; }
-  const st = e.target.closest('.steps i'); if (st) { cur=[...st.parentNode.children].indexOf(st); pinta(); }
+  const st = e.target.closest('.steps i'); if (st) { cur=[...st.parentNode.children].indexOf(st); pinta(); window.scrollTo(0,0); guarda(); }
 });
-$('fileIn').addEventListener('change', e => { const f = e.target.files[0]; if (f && upId) subeFichero(upId, f); });
+$('fileIn').addEventListener('change', e => { if (upId) subeFicheros(upId, e.target.files); });
 document.addEventListener('dragover', e => { if (e.target.closest('[data-up]')) e.preventDefault(); });
-document.addEventListener('drop', e => { const u = e.target.closest('[data-up]'); if (!u || CERRADO) return; e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !subiendo) subeFichero(u.dataset.up, f); });
+document.addEventListener('drop', e => { const u = e.target.closest('[data-up]'); if (!u || CERRADO) return; e.preventDefault(); if (!subiendo) subeFicheros(u.dataset.up, e.dataTransfer.files); });
 document.addEventListener('input', e => {
   if (CERRADO) return;
   const t=e.target, d=t.dataset;
@@ -245,11 +278,16 @@ document.addEventListener('input', e => {
 $('sig').onclick = async () => {
   if (cur<S.length-1){ cur++; pinta(); window.scrollTo(0,0); guarda(); return; }
   if (PREVIEW) { resumen('Vista previa: así lo verías al enviar'); $('res').scrollIntoView({behavior:'smooth'}); return; }
+  const pend = S.findIndex(s => !s.q.filter(vis).every(hecho));
+  if (pend >= 0) { const { n, total } = progreso(); alert(`Para enviar ${total-n===1?'falta 1 punto':`faltan ${total-n} puntos`} por contestar. Te llevo al primer bloque con puntos pendientes.\nLo contestado ya está guardado.`); cur = pend; pinta(); window.scrollTo(0,0); return; }
   if (!confirm('¿Enviar definitivamente? Después ya no podrás cambiar las respuestas ni subir más documentos.')) return;
   $('sig').disabled = true;
   await guarda();
-  const { error } = await sb.rpc('request_submit', { p_token: TOKEN });
-  if (error) { alert('No se pudo enviar: ' + error.message); $('sig').disabled = false; return; }
+  if (pendiente) { alert('No se pudo guardar en el servidor. Revisa la conexión y vuelve a pulsar «Enviar».'); $('sig').disabled = false; return; }
+  let error;
+  try { ({ error } = await conTiempo(sb.rpc('request_submit', { p_token: TOKEN }), 20000)); } catch (e) { error = e; }
+  if (error) { alert('No se pudo enviar: ' + (error.message || error) + '\nTus respuestas están guardadas; inténtalo de nuevo en un momento.'); $('sig').disabled = false; return; }
+  try { localStorage.removeItem(LS_KEY); } catch {}
   log('submit', 'Envío definitivo del cuestionario');
   cerrar(true);
 };
@@ -269,7 +307,7 @@ $('guardarSalir').onclick = async () => {
   $('seguir').onclick = () => { p.className = 'hidden'; ['sec','nav','pausa','nota'].forEach(x=>$(x).classList.remove('hidden')); window.scrollTo(0,0); };
   window.scrollTo(0,0);
 };
-$('ant').onclick = () => { if (cur>0){cur--;pinta();window.scrollTo(0,0);} };
+$('ant').onclick = () => { if (cur>0){cur--;pinta();window.scrollTo(0,0);guarda();} };
 
 function resumen(titulo){
   const el=$('res'); el.classList.remove('hidden');
@@ -308,9 +346,25 @@ function error(msg){ $('titulo').textContent = 'Enlace no válido'; $('intro').t
   if (!spec || !Array.isArray(spec.blocks) || !spec.blocks.length) { location.replace('./#/request/' + encodeURIComponent(TOKEN)); return; }
   S = spec.blocks; A = REQ.form_answers || {};
   ITEMS = new Set((data.items||[]).map(i=>i.id));
+  // copia del navegador más reciente que lo guardado en el servidor (p. ej. se cortó la conexión): manda la copia
+  let recuperado = false;
+  try {
+    const c = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (c && c.a && typeof c.a === 'object' && c.ts > new Date(REQ.saved_at || 0).getTime() + 1000) { A = c.a; recuperado = true; }
+  } catch {}
   // los ficheros que siguen vivos en la BD mandan (por si se borró alguno desde Docuhotel)
   const vivos = new Set((data.uploads||[]).map(u=>u.id));
   Object.values(A).forEach(a => { if (a && a.files) a.files = a.files.filter(f => vivos.has(f.id)); });
+  // y los subidos que no llegaron a quedar en las respuestas (se cortó el guardado justo después) se recuperan
+  const pref = REQ.id + '__';
+  (data.uploads||[]).forEach(u => {
+    if (!u.request_item_id || !u.request_item_id.startsWith(pref)) return;
+    const qid = u.request_item_id.slice(pref.length), a = A[qid] = Object.assign({}, A[qid]);
+    if (files(a).some(f => f.id === u.id)) return;
+    a.files = files(a).concat([{ id: u.id, name: u.file_name, size: u.file_size, key: u.file_key }]);
+    if (!a.v) a.v = 'si';
+    recuperado = true;
+  });
   document.title = REQ.title + ' · Docuhotel';
   $('titulo').textContent = REQ.title;
   $('intro').innerHTML = (REQ.recipient_name ? `Para: <b>${esc(REQ.recipient_name)}</b>. ` : '') + esc(spec.intro || '') + (REQ.notes ? ' ' + esc(REQ.notes) : '');
@@ -319,7 +373,8 @@ function error(msg){ $('titulo').textContent = 'Enlace no válido'; $('intro').t
   // empieza en el primer bloque sin terminar
   const p = S.findIndex(s => !s.q.filter(vis).every(hecho)); cur = p < 0 ? S.length-1 : p;
   pinta();
-  if (REQ.saved_at) $('nota').innerHTML = `<span class="saved">✓ Último guardado: ${new Date(REQ.saved_at).toLocaleString('es-ES')}</span> · puedes cerrar y seguir otro día con este mismo enlace.`;
+  if (recuperado) guarda();
+  else if (REQ.saved_at) $('nota').innerHTML = `<span class="saved">✓ Último guardado: ${new Date(REQ.saved_at).toLocaleString('es-ES')}</span> · puedes cerrar y seguir otro día con este mismo enlace.`;
 })();
 </script>
 </body></html>
