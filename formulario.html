@@ -61,7 +61,18 @@ textarea{min-height:56px;resize:vertical}
 .saved{color:var(--ok)}.saveerr{color:var(--err)}
 .fin{background:var(--okbg);border:1px solid #BFE3CF;border-radius:12px;padding:16px 20px;margin-bottom:14px;color:var(--ok);font-size:14px;line-height:1.5}
 .fin b{display:block;font-size:16px;margin-bottom:2px}
-@media print{.top,.nav,.steps,.stepinfo,.nota,#sec{display:none!important}.res{border:0;padding:0}body{background:#fff}}
+.pct{margin-top:14px}
+.pct .lin{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px;color:var(--muted);margin-bottom:5px}
+.pct .lin b{font-size:22px;color:var(--ok)}
+.pct .bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+.pct .bar i{display:block;height:100%;background:var(--ok);border-radius:5px;transition:width .3s}
+.pausa{display:flex;justify-content:flex-end;margin-top:10px}.pausa.hidden{display:none}
+.btn.sec2{font-size:13px;padding:9px 14px;color:var(--ink)}
+.pausado{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px 20px;text-align:center;line-height:1.55}
+.pausado b{display:block;font-size:18px;margin-bottom:6px;color:var(--ok)}
+.pausado p{color:var(--muted);font-size:13.5px;margin-bottom:6px}
+.pausado .lnk{display:block;background:var(--soft);border-radius:8px;padding:9px 10px;font-size:12px;word-break:break-all;margin:12px 0}
+@media print{.top,.nav,.steps,.stepinfo,.nota,.pausa,.pct,#sec{display:none!important}.res{border:0;padding:0}body{background:#fff}}
 </style></head><body>
 <div class="top"><div class="mark">DH</div><b>Docuhotel</b><span>— Solicitud de documentación</span></div>
 <div class="wrap">
@@ -70,12 +81,15 @@ textarea{min-height:56px;resize:vertical}
     <p id="intro"></p>
     <div class="steps" id="steps"></div>
     <div class="stepinfo"><span id="stepTxt"></span><span id="totTxt"></span></div>
+    <div class="pct hidden" id="pct"><div class="lin"><span><b id="pctN">0 %</b> hecho</span><span id="pctF"></span></div><div class="bar"><i id="pctBar" style="width:0"></i></div></div>
   </div>
   <div id="fin"></div>
   <div class="sec" id="sec"></div>
   <div class="nav hidden" id="nav"><button class="btn" id="ant">← Anterior</button><span class="falta" id="falta"></span><button class="btn pri" id="sig">Siguiente →</button></div>
+  <div class="pausa hidden" id="pausa"><button class="btn sec2" id="guardarSalir">💾 Guardar y seguir en otro momento</button></div>
+  <div class="hidden" id="pausado"></div>
   <div class="res hidden" id="res"></div>
-  <p class="nota" id="nota">Se guarda solo: puedes cerrar y seguir otro día con este mismo enlace.</p>
+  <p class="nota" id="nota">Se guarda solo. Si quieres dejarlo para otro día, pulsa «Guardar y seguir en otro momento» y vuelve con este mismo enlace.</p>
 </div>
 <input type="file" id="fileIn" class="hidden">
 <script src="vendor/supabase.min.js"></script>
@@ -144,8 +158,14 @@ function pinta(){
   $('ant').disabled = cur===0;
   $('steps').innerHTML = S.map((x,i)=>`<i class="${i===cur?'cur':(x.q.filter(vis).every(hecho)?'done':'')}" title="${esc(x.t)}"></i>`).join('');
   $('stepTxt').textContent = `Bloque ${cur+1} de ${S.length} · ${s.t}`;
-  const all = S.flatMap(x=>x.q.filter(vis)); $('totTxt').textContent = `${all.filter(hecho).length} de ${all.length} puntos contestados`;
+  const all = S.flatMap(x=>x.q.filter(vis)), n = all.filter(hecho).length;
+  $('totTxt').textContent = `${n} de ${all.length} puntos contestados`;
+  const pc = all.length ? Math.floor(n*100/all.length) : 0, falta = all.length - n;
+  $('pct').classList.remove('hidden'); $('pausa').classList.remove('hidden');
+  $('pctN').textContent = pc + ' %'; $('pctBar').style.width = pc + '%';
+  $('pctF').textContent = falta ? `Falta ${100-pc} % · ${falta} ${falta===1?'punto':'puntos'}` : '¡Todo contestado! Ya puedes enviarlo';
 }
+const progreso = () => { const all = S.flatMap(x=>x.q.filter(vis)); return { n: all.filter(hecho).length, total: all.length }; };
 function faltaTxt(){
   const f = S[cur].q.filter(vis).filter(q=>!hecho(q)).length;
   $('sig').disabled = !!f || !!subiendo;
@@ -233,6 +253,22 @@ $('sig').onclick = async () => {
   log('submit', 'Envío definitivo del cuestionario');
   cerrar(true);
 };
+$('guardarSalir').onclick = async () => {
+  const b = $('guardarSalir'); b.disabled = true; b.textContent = 'Guardando…';
+  await guarda();
+  b.disabled = false; b.textContent = '💾 Guardar y seguir en otro momento';
+  if ($('nota').classList.contains('saveerr')) return; // no se pudo guardar: el aviso ya está en la nota
+  const { n, total } = progreso(), pc = total ? Math.floor(n*100/total) : 0;
+  log('pause', `Guardado para seguir más tarde (${n}/${total}, ${pc} %)`);
+  ['sec','nav','pausa','nota'].forEach(x=>$(x).classList.add('hidden'));
+  const p = $('pausado'); p.className = 'pausado';
+  p.innerHTML = `<b>✓ Guardado</b><p>Llevas el <strong>${pc} %</strong> (${n} de ${total} puntos). Te falta el ${100-pc} %.</p>`+
+    `<p>Ya puedes cerrar esta página. Para seguir, abre <strong>el mismo enlace del correo</strong>: entrarás justo donde lo dejaste, con todo lo que has contestado y los documentos que has subido.</p>`+
+    (PREVIEW ? '' : `<span class="lnk">${esc(location.href)}</span>`)+
+    `<button class="btn pri" id="seguir">Seguir ahora</button>`;
+  $('seguir').onclick = () => { p.className = 'hidden'; ['sec','nav','pausa','nota'].forEach(x=>$(x).classList.remove('hidden')); window.scrollTo(0,0); };
+  window.scrollTo(0,0);
+};
 $('ant').onclick = () => { if (cur>0){cur--;pinta();window.scrollTo(0,0);} };
 
 function resumen(titulo){
@@ -246,14 +282,14 @@ function resumen(titulo){
 }
 function cerrar(recien){
   CERRADO = true;
-  ['sec','nav','nota','steps','stepinfo'].forEach(x=>{ const n=$(x)||document.querySelector('.'+x); if(n) n.classList.add('hidden'); });
+  ['sec','nav','nota','steps','stepinfo','pct','pausa','pausado'].forEach(x=>{ const n=$(x)||document.querySelector('.'+x); if(n) n.classList.add('hidden'); });
   document.querySelector('.stepinfo').classList.add('hidden');
   const cuando = REQ.submitted_at ? new Date(REQ.submitted_at).toLocaleString('es-ES') : new Date().toLocaleString('es-ES');
   $('fin').innerHTML = `<div class="fin"><b>✓ ${recien?'Enviado. ¡Gracias!':'Este cuestionario ya se envió'}</b>${recien?'Queda registrado en Docuhotel. ':''}Enviado el ${esc(cuando)}. Abajo tienes el resumen de lo que contestaste.</div>`;
   resumen('Resumen de lo enviado');
   window.scrollTo(0,0);
 }
-function error(msg){ $('titulo').textContent = 'Enlace no válido'; $('intro').textContent = msg; ['sec','nav','nota'].forEach(x=>$(x).classList.add('hidden')); }
+function error(msg){ $('titulo').textContent = 'Enlace no válido'; $('intro').textContent = msg; ['sec','nav','nota','pct','pausa'].forEach(x=>$(x).classList.add('hidden')); }
 
 (async function boot(){
   if (PREVIEW) {

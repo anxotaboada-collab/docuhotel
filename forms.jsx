@@ -182,7 +182,7 @@ function FormRequestView({ state, setState, t, lang, log, request, onSave, onCan
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(280px, 1fr)", gap: 24, marginTop: 12 }} className="form-request-grid">
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 18 }}>
-            {[["Contestado", `${pr.done}/${pr.total}`, "var(--ink)"], ["Documentos", cnt.docs, "var(--ok)"], ["No los tiene", cnt.sinDoc, "var(--warn)"], ["Equipos cambiados", cnt.cambiados, "var(--warn)"]].map(([l, v, c]) => (
+            {[[`Hecho (${pr.done}/${pr.total})`, `${pr.total ? Math.floor(pr.done * 100 / pr.total) : 0} %`, "var(--ink)"], ["Documentos", cnt.docs, "var(--ok)"], ["No los tiene", cnt.sinDoc, "var(--warn)"], ["Equipos cambiados", cnt.cambiados, "var(--warn)"]].map(([l, v, c]) => (
               <div key={l} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".04em" }}>{l}</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
