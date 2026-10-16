@@ -252,6 +252,31 @@ function App() {
 
   const openViewer = (doc) => setViewerDoc(doc);
   const closeViewer = () => setViewerDoc(null);
+
+  // Enlace directo a un documento: ?doc=<id> (p. ej. desde la Enciclopedia de
+  // Korea). Va en la query y no en el hash porque el traspaso de sesión del
+  // hub/Korea recarga la página quitando el hash. Si el documento es de otro
+  // hotel al que el usuario tiene acceso, se cambia a ese hotel y se abre allí.
+  const deepDocRef = React.useRef({ id: new URLSearchParams(window.location.search).get("doc"), tried: false });
+  useEffect(() => {
+    const dd = deepDocRef.current;
+    if (!dd.id || bootStatus !== "ready" || !state) return;
+    const done = (msg) => {
+      dd.id = null;
+      const u = new URL(window.location.href); u.searchParams.delete("doc");
+      window.history.replaceState(null, "", u.pathname + u.search + u.hash);
+      if (msg) pushToast(msg);
+    };
+    const found = (state.documents || []).find(x => x.id === dd.id);
+    if (found) { setTab("documents"); setViewerDoc(found); done(); return; }
+    if (dd.tried || !window.DocuApi?.client) { done("No tienes acceso a ese documento o ya no existe."); return; }
+    dd.tried = true;
+    window.DocuApi.client.from("documents").select("hotel_id").eq("id", dd.id).maybeSingle()
+      .then(({ data }) => {
+        if (data?.hotel_id && data.hotel_id !== state.hotelId) switchHotel(data.hotel_id);
+        else done("No tienes acceso a ese documento o ya no existe.");
+      }, () => done("No tienes acceso a ese documento o ya no existe."));
+  }, [bootStatus, state]);
   const onDownloaded = (doc) => {
     log("doc_download", doc.title);
     pushToast(`✓ ${t.common.download}: ${doc.title}`);
