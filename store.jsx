@@ -522,13 +522,17 @@ async function _loadStateFromBackend(targetHotelId, preloadedSession) {
   // just the user's primary hotel (the switcher will hide or only show one
   // option, which is fine; the next reload may catch a warmer backend).
   const wanted = targetHotelId || me.hotel.id;
+  // The timer is cleared when the list arrives: otherwise the ">12s" warning
+  // fired on every load even when the RPC answered in milliseconds.
+  let accessibleTimer = null;
   const accessiblePromise = Promise.race([
     window.DocuApi.listAccessibleHotels().then((arr) => (arr && arr.length ? arr : [meHotel]),
-      (e) => { console.warn("[docuhotel] listAccessibleHotels failed:", e?.message || e); return [meHotel]; }),
-    new Promise((resolve) => setTimeout(() => {
+      (e) => { console.warn("[docuhotel] listAccessibleHotels failed:", e?.message || e); return [meHotel]; })
+      .finally(() => clearTimeout(accessibleTimer)),
+    new Promise((resolve) => { accessibleTimer = setTimeout(() => {
       console.warn("[docuhotel] listAccessibleHotels >12s; continuing with primary hotel only");
       resolve([meHotel]);
-    }, 12000)),
+    }, 12000); }),
   ]);
   const [accessible, s] = await Promise.all([
     accessiblePromise,
